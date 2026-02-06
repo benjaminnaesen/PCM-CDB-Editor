@@ -1,4 +1,5 @@
 *.cdb
 __pycache__/
 .venv/
-*.exe
+OfficialRelease.cdb
+OfficialRelease.cdb.beforeImport
