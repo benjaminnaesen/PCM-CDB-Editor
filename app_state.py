@@ -11,17 +11,17 @@ class AppState:
     def load_settings(self):
         if os.path.exists(self.settings_file):
             try:
-                with open(self.settings_file, "r") as f:
-                    return json.load(f)
+                with open(self.settings_file, "r") as file:
+                    return json.load(file)
             except: pass
-        return {"favorites": [], "window_size": "1200x800", "last_path": "", "is_maximized": True}
+        return {"favorites": [], "window_size": "1200x800", "last_path": "", "is_maximized": False}
 
     def save_settings(self, window_geometry, is_maximized):
         self.settings["favorites"] = self.favorites
         self.settings["window_size"] = window_geometry
         self.settings["is_maximized"] = is_maximized
-        with open(self.settings_file, "w") as f:
-            json.dump(self.settings, f, indent=4)
+        with open(self.settings_file, "w") as file:
+            json.dump(self.settings, file, indent=4)
 
     def push_undo(self, table, col, old, new, pk):
         self.undo_stack.append({"table": table, "column": col, "old": old, "new": new, "pk": pk})

@@ -3,10 +3,10 @@ import os, subprocess, shutil, tempfile
 TOOL_PATH = os.path.join("SQLiteExporter", "SQLiteExporter.exe")
 
 def export_cdb_to_sqlite(cdb_path):
-    abs_cdb = os.path.abspath(cdb_path)
+    abs_cdb_path = os.path.abspath(cdb_path)
     temp_sqlite = os.path.join(tempfile.gettempdir(), "pcm_working_db.sqlite")
-    local_sqlite = abs_cdb.replace(".cdb", ".sqlite")
-    subprocess.run([TOOL_PATH, "-a", "-export", abs_cdb], check=True)
+    local_sqlite = abs_cdb_path.replace(".cdb", ".sqlite")
+    subprocess.run([TOOL_PATH, "-a", "-export", abs_cdb_path], check=True)
     if os.path.exists(temp_sqlite): os.remove(temp_sqlite)
     shutil.move(local_sqlite, temp_sqlite)
     return temp_sqlite

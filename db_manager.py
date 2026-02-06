@@ -8,19 +8,19 @@ class DatabaseManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-            return [r[0] for r in cursor.fetchall()]
+            return [row[0] for row in cursor.fetchall()]
 
     def fetch_data(self, table_name, search_term=None):
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(f"PRAGMA table_info([{table_name}])")
-            cols = [c[1] for c in cursor.fetchall()]
+            columns = [col[1] for col in cursor.fetchall()]
             if search_term:
-                where = " OR ".join([f"CAST([{col}] AS TEXT) LIKE ?" for col in cols])
-                cursor.execute(f"SELECT * FROM [{table_name}] WHERE {where}", [f"%{search_term}%"] * len(cols))
+                where_clause = " OR ".join([f"CAST([{col}] AS TEXT) LIKE ?" for col in columns])
+                cursor.execute(f"SELECT * FROM [{table_name}] WHERE {where_clause}", [f"%{search_term}%"] * len(columns))
             else:
                 cursor.execute(f"SELECT * FROM [{table_name}]")
-            return cols, cursor.fetchall()
+            return columns, cursor.fetchall()
 
     def get_max_id(self, table, id_column):
         with sqlite3.connect(self.db_path) as conn:
@@ -39,9 +39,9 @@ class DatabaseManager:
             conn.execute(f"DELETE FROM [{table}] WHERE [{pk_col}]=?", (pk_val,))
             conn.commit()
 
-    def insert_row(self, table, cols, vals):
+    def insert_row(self, table, columns, values):
         with sqlite3.connect(self.db_path) as conn:
-            placeholders = ", ".join(["?"] * len(vals))
-            col_str = ", ".join([f"[{c}]" for c in cols])
-            conn.execute(f"INSERT INTO [{table}] ({col_str}) VALUES ({placeholders})", vals)
+            placeholders = ", ".join(["?"] * len(values))
+            col_names = ", ".join([f"[{c}]" for c in columns])
+            conn.execute(f"INSERT INTO [{table}] ({col_names}) VALUES ({placeholders})", values)
             conn.commit()
