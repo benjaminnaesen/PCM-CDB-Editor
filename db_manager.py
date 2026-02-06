@@ -15,15 +15,11 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute(f"PRAGMA table_info([{table_name}])")
             cols = [c[1] for c in cursor.fetchall()]
-
             if search_term:
-                where_clauses = [f"CAST([{col}] AS TEXT) LIKE ?" for col in cols]
-                sql = f"SELECT * FROM [{table_name}] WHERE {' OR '.join(where_clauses)}"
-                params = [f"%{search_term}%"] * len(cols)
-                cursor.execute(sql, params)
+                where = " OR ".join([f"CAST([{col}] AS TEXT) LIKE ?" for col in cols])
+                cursor.execute(f"SELECT * FROM [{table_name}] WHERE {where}", [f"%{search_term}%"] * len(cols))
             else:
                 cursor.execute(f"SELECT * FROM [{table_name}]")
-            
             return cols, cursor.fetchall()
 
     def get_max_id(self, table, id_column):

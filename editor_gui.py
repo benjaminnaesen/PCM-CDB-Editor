@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
-import gc, os
+import gc, os, sys
 from db_manager import DatabaseManager
 from app_state import AppState
 import converter
@@ -10,7 +10,17 @@ class CDBEditor:
         self.root = root
         self.root.title("PCM CDB Editor")
         self.state = AppState("session_config.json")
-        self.root.geometry(self.state.settings.get("window_size", "1200x800"))
+        
+        self.normal_geometry = self.state.settings.get("window_size", "1200x800")
+        self.root.geometry(self.normal_geometry)
+        
+        if self.state.settings.get("is_maximized", False):
+            try:
+                if sys.platform.startswith('win'): self.root.state('zoomed')
+                else: self.root.attributes('-zoomed', True)
+            except: pass
+        
+        self.root.bind("<Configure>", self.track_window_size)
         
         self.db = None
         self.temp_path = None
@@ -26,6 +36,14 @@ class CDBEditor:
         self.root.bind("<Control-z>", lambda e: self.undo())
         self.root.bind("<Control-y>", lambda e: self.redo())
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def track_window_size(self, event):
+        try:
+            is_zoomed = False
+            if sys.platform.startswith('win'): is_zoomed = self.root.state() == 'zoomed'
+            else: is_zoomed = self.root.attributes('-zoomed')
+            if not is_zoomed: self.normal_geometry = self.root.geometry()
+        except: pass
 
     def _setup_ui(self):
         toolbar = tk.Frame(self.root, pady=10, bg="#f0f0f0")
@@ -46,7 +64,6 @@ class CDBEditor:
         self.pw = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#ccc")
         self.pw.pack(expand=True, fill=tk.BOTH)
 
-        # Sidebar
         s_cont = tk.Frame(self.pw, bg="#e1e1e1")
         self.pw.add(s_cont)
         tk.Label(s_cont, text=" ⭐ FAVORITES", anchor="w", bg="#ffd700", font=("SegoeUI", 8, "bold")).pack(fill=tk.X)
@@ -65,7 +82,6 @@ class CDBEditor:
         self.sidebar.bind("<<ListboxSelect>>", lambda e: self.on_sidebar_select(self.sidebar))
         self.sidebar.bind("<Button-3>", lambda e: self.show_sidebar_menu(e, self.sidebar))
 
-        # Table
         self.table_frame = tk.Frame(self.pw)
         self.pw.add(self.table_frame)
         self.tree = ttk.Treeview(self.table_frame, show="headings", selectmode="browse")
@@ -198,11 +214,14 @@ class CDBEditor:
         sel = self.tree.selection()
         if not sel: return
         vals = list(self.tree.item(sel[0], "values"))
+        idx = self.tree.index(sel[0])
         try:
             cols, _ = self.db.fetch_data(self.current_table)
             vals[0] = self.db.get_max_id(self.current_table, cols[0])
             self.db.insert_row(self.current_table, cols, vals)
-            self.load_table_data()
+            tag = 'evenrow' if (idx + 1) % 2 == 0 else 'oddrow'
+            new_item = self.tree.insert("", idx + 1, values=vals, tags=(tag,))
+            self.tree.selection_set(new_item); self.tree.see(new_item)
         except Exception as e: messagebox.showerror("Error", str(e))
 
     def delete_row(self):
@@ -220,5 +239,10 @@ class CDBEditor:
         if row: self.tree.selection_set(row); self.row_menu.post(e.x_root, e.y_root)
 
     def on_close(self):
-        self.state.save_settings(self.root.geometry())
+        is_zoomed = False
+        try:
+            if sys.platform.startswith('win'): is_zoomed = self.root.state() == 'zoomed'
+            else: is_zoomed = self.root.attributes('-zoomed')
+        except: pass
+        self.state.save_settings(self.normal_geometry, is_zoomed)
         self.root.destroy()

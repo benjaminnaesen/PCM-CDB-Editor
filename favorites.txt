@@ -1,2 +1,0 @@
-DYN_cyclist
-DYN_team
