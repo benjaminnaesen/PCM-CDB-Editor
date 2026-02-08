@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
 import gc, os, sys
+import threading
 from db_manager import DatabaseManager
 from app_state import AppState
 import converter
@@ -203,8 +204,11 @@ class CDBEditor:
     def load_cdb(self, path=None):
         if not path: path = filedialog.askopenfilename(initialdir=self.state.settings.get("last_path",""), filetypes=[("CDB files", "*.cdb")])
         if not path: return
-        try:
-            self.temp_path = converter.export_cdb_to_sqlite(path)
+        
+        def task(): return converter.export_cdb_to_sqlite(path)
+        
+        def on_success(temp_path):
+            self.temp_path = temp_path
             self.db = DatabaseManager(self.temp_path); self.all_tables = self.db.get_table_list()
             self.filter_sidebar(); self.refresh_fav_ui(); self.state.settings["last_path"] = os.path.dirname(path)
             if self.fav_lb.size() > 0:
@@ -214,7 +218,32 @@ class CDBEditor:
             self.welcome_screen.hide()
             self.editor_frame.pack(fill=tk.BOTH, expand=True)
             self.status.config(text=f"Loaded: {path}")
-        except Exception as e: messagebox.showerror("Error", str(e))
+
+        self.run_async(task, on_success, "Opening CDB...")
+
+    def run_async(self, task, callback, message):
+        popup = tk.Toplevel(self.root); popup.title("Please wait..."); popup.geometry("300x100")
+        popup.resizable(False, False); popup.transient(self.root); popup.grab_set()
+        try:
+            x = self.root.winfo_rootx() + (self.root.winfo_width() // 2) - 150
+            y = self.root.winfo_rooty() + (self.root.winfo_height() // 2) - 50
+            popup.geometry(f"+{x}+{y}")
+        except: pass
+        tk.Label(popup, text=message, pady=10).pack()
+        pb = ttk.Progressbar(popup, mode="indeterminate"); pb.pack(fill=tk.X, padx=20, pady=5); pb.start(10)
+        
+        def thread_target():
+            try: res = task(); self.root.after(0, lambda: finish(res, None))
+            except Exception as e: self.root.after(0, lambda: finish(None, e))
+        
+        def finish(res, err):
+            popup.destroy()
+            if err: messagebox.showerror("Error", str(err))
+            else:
+                try: callback(res)
+                except Exception as e: messagebox.showerror("Error", str(e))
+        
+        threading.Thread(target=thread_target, daemon=True).start()
 
     def _create_search_box(self, parent, var, width):
         frame = tk.Frame(parent, bg="white", highlightbackground="#ccc", highlightthickness=1)
@@ -272,7 +301,10 @@ class CDBEditor:
 
     def save_as_cdb(self):
         path = filedialog.asksaveasfilename(defaultextension=".cdb", filetypes=[("CDB files", "*.cdb")])
-        if path: gc.collect(); converter.import_sqlite_to_cdb(self.temp_path, path); messagebox.showinfo("Saved", "Success")
+        if path: 
+            gc.collect()
+            def task(): converter.import_sqlite_to_cdb(self.temp_path, path)
+            self.run_async(task, lambda _: None, "Saving CDB...")
 
     def show_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)
