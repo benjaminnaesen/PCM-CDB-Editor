@@ -49,7 +49,7 @@ class CDBEditor:
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *args: self.load_table_data())
         self._create_search_box(toolbar, self.search_var, 40).pack(side=tk.RIGHT, padx=15)
-        self.lookup_var = tk.BooleanVar()
+        self.lookup_var = tk.BooleanVar(value=self.state.settings.get("lookup_mode", False))
         tk.Checkbutton(toolbar, text="Lookup Mode", variable=self.lookup_var, command=self.load_table_data).pack(side=tk.RIGHT, padx=5)
 
         self.pw = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#ccc")
@@ -197,6 +197,9 @@ class CDBEditor:
             self.temp_path = converter.export_cdb_to_sqlite(path)
             self.db = DatabaseManager(self.temp_path); self.all_tables = self.db.get_table_list()
             self.filter_sidebar(); self.refresh_fav_ui(); self.state.settings["last_path"] = os.path.dirname(path)
+            if self.fav_lb.size() > 0:
+                self.fav_lb.selection_set(0)
+                self.on_sidebar_select(self.fav_lb)
             self.status.config(text=f"Loaded: {path}")
         except Exception as e: messagebox.showerror("Error", str(e))
 
@@ -266,4 +269,4 @@ class CDBEditor:
         is_maximized = False
         try: is_maximized = self.root.state() == 'zoomed' if sys.platform.startswith('win') else self.root.attributes('-zoomed')
         except: pass
-        self.state.save_settings(self.normal_geometry, is_maximized); self.root.destroy()
+        self.state.save_settings(self.normal_geometry, is_maximized, self.lookup_var.get()); self.root.destroy()

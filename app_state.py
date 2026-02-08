@@ -14,12 +14,13 @@ class AppState:
                 with open(self.settings_file, "r") as file:
                     return json.load(file)
             except: pass
-        return {"favorites": [], "window_size": "1200x800", "last_path": "", "is_maximized": False}
+        return {"favorites": [], "window_size": "1200x800", "last_path": "", "is_maximized": False, "lookup_mode": False}
 
-    def save_settings(self, window_geometry, is_maximized):
+    def save_settings(self, window_geometry, is_maximized, lookup_mode):
         self.settings["favorites"] = self.favorites
         self.settings["window_size"] = window_geometry
         self.settings["is_maximized"] = is_maximized
+        self.settings["lookup_mode"] = lookup_mode
         with open(self.settings_file, "w") as file:
             json.dump(self.settings, file, indent=4)
 
