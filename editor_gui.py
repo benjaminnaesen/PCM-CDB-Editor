@@ -68,6 +68,8 @@ class CDBEditor:
         self.fav_lb.pack(fill=tk.X, padx=2, pady=2)
         self.fav_lb.bind("<<ListboxSelect>>", lambda e: self.on_sidebar_select(self.fav_lb))
         self.fav_lb.bind("<Button-3>", lambda e: self.show_sidebar_menu(e, self.fav_lb))
+        self.fav_lb.bind("<Button-1>", self.on_fav_press)
+        self.fav_lb.bind("<B1-Motion>", self.on_fav_motion)
 
         tk.Label(sidebar_container, text=" 📂 TABLES", anchor="w", bg="#444", fg="white", font=("SegoeUI", 8, "bold")).pack(fill=tk.X, pady=(5,0))
         self.filter_var = tk.StringVar()
@@ -271,7 +273,22 @@ class CDBEditor:
 
     def refresh_fav_ui(self):
         self.fav_lb.delete(0, "end")
-        for table in sorted([f for f in self.state.favorites if f in self.all_tables]): self.fav_lb.insert("end", table)
+        for table in [f for f in self.state.favorites if f in self.all_tables]: self.fav_lb.insert("end", table)
+
+    def on_fav_press(self, event):
+        self.cur_fav_index = self.fav_lb.nearest(event.y)
+
+    def on_fav_motion(self, event):
+        i = self.fav_lb.nearest(event.y)
+        if i < self.fav_lb.size() and i != self.cur_fav_index:
+            text = self.fav_lb.get(self.cur_fav_index)
+            self.fav_lb.delete(self.cur_fav_index)
+            self.fav_lb.insert(i, text)
+            self.fav_lb.selection_set(i)
+            self.cur_fav_index = i
+            visible = list(self.fav_lb.get(0, tk.END))
+            hidden = [f for f in self.state.favorites if f not in visible]
+            self.state.favorites = visible + hidden
 
     def on_sidebar_select(self, widget):
         selection = widget.curselection()
