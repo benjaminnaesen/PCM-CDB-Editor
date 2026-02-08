@@ -1,11 +1,11 @@
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
 import gc, os, sys
-import threading
-from db_manager import DatabaseManager
-from app_state import AppState
-import converter
-from welcome_screen import WelcomeScreen
+from core.db_manager import DatabaseManager
+from core.app_state import AppState
+import core.converter as converter
+from ui.welcome_screen import WelcomeScreen
+from ui.ui_utils import run_async
 
 class CDBEditor:
     def __init__(self, root):
@@ -261,31 +261,7 @@ class CDBEditor:
             self.status.config(text=f"Loaded: {path}")
             self.unsaved_changes = False
 
-        self.run_async(task, on_success, "Opening CDB...")
-
-    def run_async(self, task, callback, message):
-        popup = tk.Toplevel(self.root); popup.title("Please wait..."); popup.geometry("300x100")
-        popup.resizable(False, False); popup.transient(self.root); popup.grab_set()
-        try:
-            x = self.root.winfo_rootx() + (self.root.winfo_width() // 2) - 150
-            y = self.root.winfo_rooty() + (self.root.winfo_height() // 2) - 50
-            popup.geometry(f"+{x}+{y}")
-        except: pass
-        tk.Label(popup, text=message, pady=10).pack()
-        pb = ttk.Progressbar(popup, mode="indeterminate"); pb.pack(fill=tk.X, padx=20, pady=5); pb.start(10)
-        
-        def thread_target():
-            try: res = task(); self.root.after(0, lambda: finish(res, None))
-            except Exception as e: self.root.after(0, lambda err=e: finish(None, err))
-        
-        def finish(res, err):
-            popup.destroy()
-            if err: messagebox.showerror("Error", str(err))
-            else:
-                try: callback(res)
-                except Exception as e: messagebox.showerror("Error", str(e))
-        
-        threading.Thread(target=thread_target, daemon=True).start()
+        run_async(self.root, task, on_success, "Opening CDB...")
 
     def _create_search_box(self, parent, var, width):
         frame = tk.Frame(parent, bg="white", highlightbackground="#ccc", highlightthickness=1)
@@ -363,7 +339,7 @@ class CDBEditor:
         if path: 
             gc.collect()
             def task(): converter.import_sqlite_to_cdb(self.temp_path, path)
-            self.run_async(task, lambda _: setattr(self, 'unsaved_changes', False), "Saving CDB...")
+            run_async(self.root, task, lambda _: setattr(self, 'unsaved_changes', False), "Saving CDB...")
 
     def show_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)

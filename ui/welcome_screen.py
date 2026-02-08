@@ -1,7 +1,7 @@
 import tkinter as tk
 import os
 from tkinter import messagebox
-from ui_utils import ToolTip
+from ui.ui_utils import ToolTip
 
 class WelcomeScreen:
     def __init__(self, root_frame, app_state, load_callback):
