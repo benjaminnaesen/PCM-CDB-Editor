@@ -4,6 +4,7 @@ import gc, os, sys
 from db_manager import DatabaseManager
 from app_state import AppState
 import converter
+from welcome_screen import WelcomeScreen
 
 class CDBEditor:
     def __init__(self, root):
@@ -38,7 +39,11 @@ class CDBEditor:
         except: pass
 
     def _setup_ui(self):
-        toolbar = tk.Frame(self.root, pady=10, bg="#f0f0f0")
+        self.editor_frame = tk.Frame(self.root)
+        self.welcome_frame = tk.Frame(self.root, bg="#f0f0f0")
+        self.welcome_screen = WelcomeScreen(self.welcome_frame, self.state, self.load_cdb)
+
+        toolbar = tk.Frame(self.editor_frame, pady=10, bg="#f0f0f0")
         toolbar.pack(side=tk.TOP, fill=tk.X)
         tk.Button(toolbar, text="Open CDB", command=self.load_cdb, width=10).pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Save As...", command=self.save_as_cdb, width=10).pack(side=tk.LEFT, padx=5)
@@ -52,7 +57,7 @@ class CDBEditor:
         self.lookup_var = tk.BooleanVar(value=self.state.settings.get("lookup_mode", False))
         tk.Checkbutton(toolbar, text="Lookup Mode", variable=self.lookup_var, command=self.load_table_data).pack(side=tk.RIGHT, padx=5)
 
-        self.pw = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#ccc")
+        self.pw = tk.PanedWindow(self.editor_frame, orient=tk.HORIZONTAL, sashwidth=4, bg="#ccc")
         self.pw.pack(expand=True, fill=tk.BOTH)
 
         sidebar_container = tk.Frame(self.pw, bg="#e1e1e1")
@@ -81,9 +86,14 @@ class CDBEditor:
         self.tree.grid(row=0, column=0, sticky='nsew'); vsb.grid(row=0, column=1, sticky='ns'); hsb.grid(row=1, column=0, sticky='ew')
         self.table_frame.grid_columnconfigure(0, weight=1); self.table_frame.grid_rowconfigure(0, weight=1)
 
-        self.status = tk.Label(self.root, text="Ready", bd=1, relief="sunken", anchor="w")
+        self.status = tk.Label(self.editor_frame, text="Ready", bd=1, relief="sunken", anchor="w")
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
         self.tree.bind("<Double-1>", self.on_double_click); self.tree.bind("<Button-3>", self.show_context_menu)
+        self.show_welcome_screen()
+
+    def show_welcome_screen(self):
+        self.editor_frame.pack_forget()
+        self.welcome_screen.show()
 
     def sort_column(self, col, reverse):
         items = [(self.tree.set(k, col), k) for k in self.tree.get_children('')]
@@ -200,6 +210,9 @@ class CDBEditor:
             if self.fav_lb.size() > 0:
                 self.fav_lb.selection_set(0)
                 self.on_sidebar_select(self.fav_lb)
+            self.state.add_recent(path)
+            self.welcome_screen.hide()
+            self.editor_frame.pack(fill=tk.BOTH, expand=True)
             self.status.config(text=f"Loaded: {path}")
         except Exception as e: messagebox.showerror("Error", str(e))
 
