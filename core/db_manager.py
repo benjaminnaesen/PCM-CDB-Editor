@@ -99,3 +99,34 @@ class DatabaseManager:
             col_names = ", ".join([f"[{c}]" for c in columns])
             conn.execute(f"INSERT INTO [{table}] ({col_names}) VALUES ({placeholders})", values)
             conn.commit()
+
+    def get_fk_options(self, fk_column):
+        if not fk_column.startswith("fkID") or len(fk_column) <= 4: return None
+        suffix = fk_column[4:]
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            if not self.table_map_cache:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                self.table_map_cache = {r[0].upper(): r[0] for r in cursor.fetchall()}
+            
+            target_table = None
+            for candidate in [f"DYN_{suffix}", f"STA_{suffix}", f"GAM_{suffix}", suffix]:
+                if candidate.upper() in self.table_map_cache:
+                    target_table = self.table_map_cache[candidate.upper()]; break
+            
+            if not target_table: return None
+
+            try:
+                cursor.execute(f"PRAGMA table_info([{target_table}])")
+                target_info = cursor.fetchall()
+                target_cols = [c[1] for c in target_info]
+                target_pk = next((c[1] for c in target_info if c[5] > 0), target_cols[0] if target_cols else "ID")
+                target_col = next((c for c in ["gene_sz_name", "name", "szName", "sz_name"] if c in target_cols), None)
+                if not target_col and len(target_cols) > 1: target_col = target_cols[1]
+                
+                if target_col:
+                    cursor.execute(f"SELECT [{target_col}], [{target_pk}] FROM [{target_table}] ORDER BY [{target_col}]")
+                    return {str(row[0]): row[1] for row in cursor.fetchall() if row[0] is not None}
+            except: pass
+        return None
