@@ -49,6 +49,8 @@ class CDBEditor:
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *args: self.load_table_data())
         self._create_search_box(toolbar, self.search_var, 40).pack(side=tk.RIGHT, padx=15)
+        self.lookup_var = tk.BooleanVar()
+        tk.Checkbutton(toolbar, text="Lookup Mode", variable=self.lookup_var, command=self.load_table_data).pack(side=tk.RIGHT, padx=5)
 
         self.pw = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=4, bg="#ccc")
         self.pw.pack(expand=True, fill=tk.BOTH)
@@ -97,7 +99,7 @@ class CDBEditor:
 
     def load_table_data(self):
         if not self.current_table or not self.db: return
-        columns, row_data = self.db.fetch_data(self.current_table, self.search_var.get())
+        columns, row_data = self.db.fetch_data(self.current_table, self.search_var.get(), self.lookup_var.get())
         self.tree["columns"] = columns; self.sort_state = {"column": None, "reverse": False}
         for col in columns:
             self.tree.heading(col, text=col, command=lambda _c=col: self.sort_column(_c, False))
@@ -132,6 +134,7 @@ class CDBEditor:
         if self.active_editor: self.active_editor.destroy()
 
         col_name = self.tree["columns"][index]
+        if self.lookup_var.get() and col_name.startswith("fkID"): return
         values = self.tree.item(item, "values")
         pk_val, old_val = values[0], values[index]
 
