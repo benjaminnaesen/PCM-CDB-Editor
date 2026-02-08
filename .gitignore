@@ -4,3 +4,4 @@ __pycache__/
 session_config.json
 OfficialRelease.cdb
 OfficialRelease.cdb.beforeImport
+OfficialRelease.sqlite

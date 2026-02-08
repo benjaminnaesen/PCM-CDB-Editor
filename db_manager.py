@@ -3,6 +3,8 @@ import sqlite3
 class DatabaseManager:
     def __init__(self, db_path):
         self.db_path = db_path
+        self.schema_cache = {}
+        self.table_map_cache = None
 
     def get_table_list(self):
         with sqlite3.connect(self.db_path) as conn:
@@ -10,23 +12,28 @@ class DatabaseManager:
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
             return [row[0] for row in cursor.fetchall()]
 
-    def fetch_data(self, table_name, search_term=None, lookup=False):
+    def fetch_data(self, table_name, search_term=None, lookup=False, limit=None, offset=0, sort_col=None, sort_reverse=False):
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute(f"PRAGMA table_info([{table_name}])")
-            columns = [col[1] for col in cursor.fetchall()]
+            
+            if table_name in self.schema_cache: columns = self.schema_cache[table_name]
+            else:
+                cursor.execute(f"PRAGMA table_info([{table_name}])")
+                columns = [col[1] for col in cursor.fetchall()]
+                self.schema_cache[table_name] = columns
             
             select_fields = [f"[{c}]" for c in columns]
             if lookup:
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                tables_map = {r[0].upper(): r[0] for r in cursor.fetchall()}
+                if not self.table_map_cache:
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                    self.table_map_cache = {r[0].upper(): r[0] for r in cursor.fetchall()}
                 for i, col in enumerate(columns):
                     if col.startswith("fkID") and len(col) > 4:
                         suffix = col[4:]
                         target_table = None
                         for candidate in [f"DYN_{suffix}", f"STA_{suffix}", f"GAM_{suffix}", suffix]:
-                            if candidate.upper() in tables_map:
-                                target_table = tables_map[candidate.upper()]; break
+                            if candidate.upper() in self.table_map_cache:
+                                target_table = self.table_map_cache[candidate.upper()]; break
                         if target_table:
                             try:
                                 cursor.execute(f"PRAGMA table_info([{target_table}])")
@@ -40,12 +47,34 @@ class DatabaseManager:
                             except: pass
 
             query_cols = ", ".join(select_fields)
+            sql = f"SELECT {query_cols} FROM [{table_name}]"
+            params = []
+
             if search_term:
                 where_clause = " OR ".join([f"CAST([{col}] AS TEXT) LIKE ?" for col in columns])
-                cursor.execute(f"SELECT {query_cols} FROM [{table_name}] WHERE {where_clause}", [f"%{search_term}%"] * len(columns))
-            else:
-                cursor.execute(f"SELECT {query_cols} FROM [{table_name}]")
+                sql += f" WHERE {where_clause}"
+                params = [f"%{search_term}%"] * len(columns)
+            
+            if sort_col:
+                sql += f" ORDER BY [{sort_col}] {'DESC' if sort_reverse else 'ASC'}"
+            
+            if limit is not None:
+                sql += f" LIMIT {limit} OFFSET {offset}"
+
+            cursor.execute(sql, params)
             return columns, cursor.fetchall()
+
+    def get_row_count(self, table_name, search_term=None):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            if search_term:
+                cursor.execute(f"PRAGMA table_info([{table_name}])")
+                columns = [col[1] for col in cursor.fetchall()]
+                where_clause = " OR ".join([f"CAST([{col}] AS TEXT) LIKE ?" for col in columns])
+                cursor.execute(f"SELECT COUNT(*) FROM [{table_name}] WHERE {where_clause}", [f"%{search_term}%"] * len(columns))
+            else:
+                cursor.execute(f"SELECT COUNT(*) FROM [{table_name}]")
+            return cursor.fetchone()[0]
 
     def get_max_id(self, table, id_column):
         with sqlite3.connect(self.db_path) as conn:

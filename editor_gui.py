@@ -26,6 +26,9 @@ class CDBEditor:
         self.all_tables, self.active_editor = [], None
         self.sort_state = {"column": None, "reverse": False}
         self.sidebar_even, self.sidebar_odd, self.fav_color = "#e8e8e8", "#fdfdfd", "#fff9c4"
+        self.page_size = 50
+        self.offset, self.total_rows, self.loading_data = 0, 0, False
+        self.unsaved_changes = False
 
         self._setup_ui()
         self._create_menus()
@@ -47,13 +50,14 @@ class CDBEditor:
         toolbar = tk.Frame(self.editor_frame, pady=10, bg="#f0f0f0")
         toolbar.pack(side=tk.TOP, fill=tk.X)
         tk.Button(toolbar, text="Open CDB", command=self.load_cdb, width=10).pack(side=tk.LEFT, padx=5)
+        tk.Button(toolbar, text="Close CDB", command=self.close_cdb, width=10).pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Save As...", command=self.save_as_cdb, width=10).pack(side=tk.LEFT, padx=5)
         self.undo_btn = tk.Button(toolbar, text="↶ Undo", command=self.undo, state="disabled")
         self.undo_btn.pack(side=tk.LEFT, padx=5)
         self.redo_btn = tk.Button(toolbar, text="↷ Redo", command=self.redo, state="disabled")
         self.redo_btn.pack(side=tk.LEFT, padx=5)
         self.search_var = tk.StringVar()
-        self.search_var.trace_add("write", lambda *args: self.load_table_data())
+        self.search_var.trace_add("write", self.on_search)
         self._create_search_box(toolbar, self.search_var, 40).pack(side=tk.RIGHT, padx=15)
         self.lookup_var = tk.BooleanVar(value=self.state.settings.get("lookup_mode", False))
         tk.Checkbutton(toolbar, text="Lookup Mode", variable=self.lookup_var, command=self.load_table_data).pack(side=tk.RIGHT, padx=5)
@@ -84,9 +88,9 @@ class CDBEditor:
         self.pw.add(self.table_frame)
         self.tree = ttk.Treeview(self.table_frame, show="headings", selectmode="browse")
         self.tree.tag_configure('oddrow', background="#f4f4f4"); self.tree.tag_configure('evenrow', background="#ffffff")
-        vsb = ttk.Scrollbar(self.table_frame, command=self.tree.yview); hsb = ttk.Scrollbar(self.table_frame, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        self.tree.grid(row=0, column=0, sticky='nsew'); vsb.grid(row=0, column=1, sticky='ns'); hsb.grid(row=1, column=0, sticky='ew')
+        self.vsb = ttk.Scrollbar(self.table_frame, command=self.tree.yview); hsb = ttk.Scrollbar(self.table_frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=self.on_tree_scroll, xscrollcommand=hsb.set)
+        self.tree.grid(row=0, column=0, sticky='nsew'); self.vsb.grid(row=0, column=1, sticky='ns'); hsb.grid(row=1, column=0, sticky='ew')
         self.table_frame.grid_columnconfigure(0, weight=1); self.table_frame.grid_rowconfigure(0, weight=1)
 
         self.status = tk.Label(self.editor_frame, text="Ready", bd=1, relief="sunken", anchor="w")
@@ -98,36 +102,59 @@ class CDBEditor:
         self.editor_frame.pack_forget()
         self.welcome_screen.show()
 
+    def on_tree_scroll(self, first, last):
+        self.vsb.set(first, last)
+        if float(last) > 0.95: self.load_more_data()
+
+    def on_search(self, *args):
+        self.load_table_data()
+
     def sort_column(self, col, reverse):
-        items = [(self.tree.set(k, col), k) for k in self.tree.get_children('')]
-        try: items.sort(key=lambda t: float(t[0]), reverse=reverse)
-        except ValueError: items.sort(reverse=reverse)
-        for index, (val, k) in enumerate(items):
-            self.tree.move(k, '', index)
-            self.tree.item(k, tags=('evenrow' if index % 2 == 0 else 'oddrow'))
         self.sort_state = {"column": col, "reverse": reverse}
-        for column in self.tree["columns"]:
-            prefix = ("▼ " if reverse else "▲ ") if column == col else ""
-            self.tree.heading(column, text=prefix + column, command=lambda _c=column: self.sort_column(_c, not reverse))
+        self.load_table_data()
 
     def load_table_data(self):
         if not self.current_table or not self.db: return
-        columns, row_data = self.db.fetch_data(self.current_table, self.search_var.get(), self.lookup_var.get())
-        self.tree["columns"] = columns; self.sort_state = {"column": None, "reverse": False}
+        self.tree.grid_remove()
+        self.offset = 0
+        self.total_rows = self.db.get_row_count(self.current_table, self.search_var.get())
+        columns, row_data = self.db.fetch_data(self.current_table, self.search_var.get(), self.lookup_var.get(), self.page_size, 0, self.sort_state["column"], self.sort_state["reverse"])
+        self.offset += len(row_data)
+
+        self.tree["columns"] = columns
         for col in columns:
-            self.tree.heading(col, text=col, command=lambda _c=col: self.sort_column(_c, False))
+            prefix = ("▼ " if self.sort_state["reverse"] else "▲ ") if col == self.sort_state["column"] else ""
+            self.tree.heading(col, text=prefix + col, command=lambda _c=col: self.sort_column(_c, not self.sort_state["reverse"] if _c == self.sort_state["column"] else False))
             self.tree.column(col, width=140, stretch=False)
         self.tree.delete(*self.tree.get_children())
         for index, row in enumerate(row_data): self.tree.insert("", "end", values=row, tags=('evenrow' if index%2==0 else 'oddrow'))
+        self.tree.grid()
+
+    def load_more_data(self):
+        if not self.current_table or self.loading_data or self.offset >= self.total_rows: return
+        self.loading_data = True
+        
+        _, row_data = self.db.fetch_data(self.current_table, self.search_var.get(), self.lookup_var.get(), self.page_size, self.offset, self.sort_state["column"], self.sort_state["reverse"])
+        
+        start_idx = self.offset
+        for index, row in enumerate(row_data):
+            self.tree.insert("", "end", values=row, tags=('evenrow' if (start_idx + index)%2==0 else 'oddrow'))
+        
+        self.offset += len(row_data)
+        self.loading_data = False
 
     def undo(self):
         action = self.state.undo()
-        if action: self.db.update_cell(action["table"], action["column"], action["old"], self.tree["columns"][0], action["pk"]); self.load_table_data()
+        if action: 
+            self.db.update_cell(action["table"], action["column"], action["old"], self.tree["columns"][0], action["pk"])
+            self.unsaved_changes = True; self.load_table_data()
         self._update_btns()
 
     def redo(self):
         action = self.state.redo()
-        if action: self.db.update_cell(action["table"], action["column"], action["new"], self.tree["columns"][0], action["pk"]); self.load_table_data()
+        if action: 
+            self.db.update_cell(action["table"], action["column"], action["new"], self.tree["columns"][0], action["pk"])
+            self.unsaved_changes = True; self.load_table_data()
         self._update_btns()
 
     def _update_btns(self):
@@ -168,6 +195,7 @@ class CDBEditor:
 
             if str(new_val) != str(old_val):
                 self.state.push_undo(self.current_table, col_name, old_val, new_val, pk_val)
+                self.unsaved_changes = True
                 self.db.update_cell(self.current_table, col_name, new_val, self.tree["columns"][0], pk_val)
                 self._update_btns()
                 if reload_data: self.load_table_data()
@@ -203,11 +231,22 @@ class CDBEditor:
         self.row_menu.add_command(label="Duplicate Row", command=self.duplicate_row)
         self.row_menu.add_command(label="Delete Row", command=self.delete_row)
 
+    def close_cdb(self):
+        if self.unsaved_changes:
+            if not messagebox.askyesno("Unsaved Changes", "You have unsaved changes. Are you sure you want to close?"): return
+        self.db = None; self.current_table = None; self.unsaved_changes = False
+        gc.collect()
+        self.editor_frame.pack_forget()
+        self.welcome_screen.show()
+        self.root.title("PCM CDB Editor")
+
     def load_cdb(self, path=None):
         if not path: path = filedialog.askopenfilename(initialdir=self.state.settings.get("last_path",""), filetypes=[("CDB files", "*.cdb")])
         if not path: return
         
-        def task(): return converter.export_cdb_to_sqlite(path)
+        def task(): 
+            gc.collect()
+            return converter.export_cdb_to_sqlite(path)
         
         def on_success(temp_path):
             self.temp_path = temp_path
@@ -220,6 +259,7 @@ class CDBEditor:
             self.welcome_screen.hide()
             self.editor_frame.pack(fill=tk.BOTH, expand=True)
             self.status.config(text=f"Loaded: {path}")
+            self.unsaved_changes = False
 
         self.run_async(task, on_success, "Opening CDB...")
 
@@ -236,7 +276,7 @@ class CDBEditor:
         
         def thread_target():
             try: res = task(); self.root.after(0, lambda: finish(res, None))
-            except Exception as e: self.root.after(0, lambda: finish(None, e))
+            except Exception as e: self.root.after(0, lambda err=e: finish(None, err))
         
         def finish(res, err):
             popup.destroy()
@@ -292,7 +332,7 @@ class CDBEditor:
 
     def on_sidebar_select(self, widget):
         selection = widget.curselection()
-        if selection: self.current_table = widget.get(selection[0]); self.load_table_data()
+        if selection: self.current_table = widget.get(selection[0]); self.sort_state = {"column": None, "reverse": False}; self.load_table_data()
 
     def filter_sidebar(self, *args):
         term = self.filter_var.get().lower(); self.sidebar.delete(0, "end")
@@ -306,6 +346,7 @@ class CDBEditor:
         try:
             columns, _ = self.db.fetch_data(self.current_table); row_values[0] = self.db.get_max_id(self.current_table, columns[0])
             self.db.insert_row(self.current_table, columns, row_values)
+            self.unsaved_changes = True
             tag = 'evenrow' if (tree_index + 1) % 2 == 0 else 'oddrow'
             new_item = self.tree.insert("", tree_index + 1, values=row_values, tags=(tag,))
             self.tree.selection_set(new_item); self.tree.see(new_item)
@@ -314,14 +355,15 @@ class CDBEditor:
     def delete_row(self):
         selection = self.tree.selection()
         if selection and messagebox.askyesno("Confirm", "Delete?"):
-            self.db.delete_row(self.current_table, self.tree["columns"][0], self.tree.item(selection[0], "values")[0]); self.load_table_data()
+            self.db.delete_row(self.current_table, self.tree["columns"][0], self.tree.item(selection[0], "values")[0])
+            self.unsaved_changes = True; self.load_table_data()
 
     def save_as_cdb(self):
         path = filedialog.asksaveasfilename(defaultextension=".cdb", filetypes=[("CDB files", "*.cdb")])
         if path: 
             gc.collect()
             def task(): converter.import_sqlite_to_cdb(self.temp_path, path)
-            self.run_async(task, lambda _: None, "Saving CDB...")
+            self.run_async(task, lambda _: setattr(self, 'unsaved_changes', False), "Saving CDB...")
 
     def show_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)
