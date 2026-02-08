@@ -120,23 +120,66 @@ class CDBEditor:
         self.redo_btn.config(state="normal" if self.state.redo_stack else "disabled")
 
     def on_double_click(self, event):
-        item, col_id = self.tree.identify_row(event.y), self.tree.identify_column(event.x)
+        item = self.tree.identify_row(event.y)
+        col_id = self.tree.identify_column(event.x)
+        self.edit_cell(item, col_id)
+
+    def edit_cell(self, item, col_id):
         if not item or not col_id: return
-        index = int(col_id[1:]) - 1
-        col_name, values = self.tree["columns"][index], self.tree.item(item, "values")
+        index = int(col_id.replace('#', '')) - 1
+        if index == 0: return  # Do not edit primary key
+
+        if self.active_editor: self.active_editor.destroy()
+
+        col_name = self.tree["columns"][index]
+        values = self.tree.item(item, "values")
         pk_val, old_val = values[0], values[index]
+
         x, y, w, h = self.tree.bbox(item, col_id)
+        self.tree.see(item)
+
         self.active_editor = tk.Entry(self.table_frame, relief="flat")
-        self.active_editor.insert(0, old_val); self.active_editor.place(x=x, y=y, width=w, height=h); self.active_editor.focus_set()
-        def commit(e=None):
+        self.active_editor.place(x=x, y=y, width=w, height=h)
+        self.active_editor.insert(0, old_val)
+        self.active_editor.select_range(0, tk.END)
+        self.active_editor.focus_set()
+
+        def commit(reload_data=True):
             if not self.active_editor: return
             new_val = self.active_editor.get()
+            editor, self.active_editor = self.active_editor, None
+            editor.destroy()
+
             if str(new_val) != str(old_val):
                 self.state.push_undo(self.current_table, col_name, old_val, new_val, pk_val)
                 self.db.update_cell(self.current_table, col_name, new_val, self.tree["columns"][0], pk_val)
                 self._update_btns()
-            editor = self.active_editor; self.active_editor = None; editor.destroy(); self.load_table_data()
-        self.active_editor.bind("<Return>", commit); self.active_editor.bind("<FocusOut>", lambda e: commit())
+                if reload_data: self.load_table_data()
+                else:
+                    new_values = list(values); new_values[index] = new_val
+                    self.tree.item(item, values=tuple(new_values))
+
+        def navigate(event):
+            commit(reload_data=False)
+            next_item, next_col_index = item, index
+            if event.keysym == 'Tab':
+                if event.state & 1:  # Shift-Tab
+                    if index > 1: next_col_index -= 1
+                    elif (p := self.tree.prev(item)): next_item, next_col_index = p, len(self.tree['columns']) - 1
+                else:  # Tab
+                    if index < len(self.tree['columns']) - 1: next_col_index += 1
+                    elif (n := self.tree.next(item)): next_item, next_col_index = n, 1
+            elif event.keysym == 'Up' and (p := self.tree.prev(item)): next_item = p
+            elif event.keysym == 'Down' and (n := self.tree.next(item)): next_item = n
+            self.tree.selection_set(next_item); self.edit_cell(next_item, f"#{next_col_index + 1}")
+            return "break"
+
+        self.active_editor.bind("<Return>", lambda e: commit())
+        self.active_editor.bind("<FocusOut>", lambda e: commit())
+        self.active_editor.bind("<Escape>", lambda e: (self.active_editor.destroy(), setattr(self, 'active_editor', None)))
+        self.active_editor.bind("<Tab>", navigate)
+        self.active_editor.bind("<Up>", navigate)
+        self.active_editor.bind("<Down>", navigate)
 
     def _create_menus(self):
         self.sidebar_menu = tk.Menu(self.root, tearoff=0)
