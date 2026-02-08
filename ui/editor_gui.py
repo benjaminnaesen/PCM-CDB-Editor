@@ -4,6 +4,7 @@ import gc, os, sys
 from core.db_manager import DatabaseManager
 from core.app_state import AppState
 import core.converter as converter
+import core.csv_io as csv_io
 from ui.welcome_screen import WelcomeScreen
 from ui.ui_utils import run_async
 
@@ -52,6 +53,13 @@ class CDBEditor:
         tk.Button(toolbar, text="Open CDB", command=self.load_cdb, width=10).pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Close CDB", command=self.close_cdb, width=10).pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Save As...", command=self.save_as_cdb, width=10).pack(side=tk.LEFT, padx=5)
+        
+        self.tools_btn = tk.Menubutton(toolbar, text="Tools", relief="raised", width=10)
+        self.tools_menu = tk.Menu(self.tools_btn, tearoff=0)
+        self.tools_menu.add_command(label="Export table to CSV...", command=self.export_csv)
+        self.tools_menu.add_command(label="Import table from CSV...", command=self.import_csv_table)
+        self.tools_btn.config(menu=self.tools_menu); self.tools_btn.pack(side=tk.LEFT, padx=5)
+
         self.undo_btn = tk.Button(toolbar, text="↶ Undo", command=self.undo, state="disabled")
         self.undo_btn.pack(side=tk.LEFT, padx=5)
         self.redo_btn = tk.Button(toolbar, text="↷ Redo", command=self.redo, state="disabled")
@@ -340,6 +348,27 @@ class CDBEditor:
             gc.collect()
             def task(): converter.import_sqlite_to_cdb(self.temp_path, path)
             run_async(self.root, task, lambda _: setattr(self, 'unsaved_changes', False), "Saving CDB...")
+
+    def export_csv(self):
+        if not self.db: return
+        if not self.current_table: return messagebox.showwarning("Warning", "No table selected.")
+        
+        path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")], initialfile=f"{self.current_table}.csv")
+        if path:
+            run_async(self.root, lambda: csv_io.export_table(self.temp_path, self.current_table, path), lambda _: None, "Exporting CSV...")
+
+    def import_csv_table(self):
+        if not self.db: return
+        if not self.current_table: return messagebox.showwarning("Warning", "No table selected.")
+        
+        path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
+        if path:
+            if not messagebox.askyesno("Confirm Import", f"This will overwrite data in '{self.current_table}' with data from the CSV. Continue?"): return
+            
+            def on_complete(_):
+                self.unsaved_changes = True
+                self.load_table_data()
+            run_async(self.root, lambda: csv_io.import_table_from_csv(self.temp_path, self.current_table, path), on_complete, "Importing CSV...")
 
     def show_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)
