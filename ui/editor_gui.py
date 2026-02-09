@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, ttk, messagebox
+from tkinter import filedialog, ttk, messagebox, simpledialog
 import gc, os, sys
 from core.db_manager import DatabaseManager
 from core.app_state import AppState
@@ -53,11 +53,21 @@ class CDBEditor:
         
         self.tools_btn = tk.Menubutton(toolbar, text="Tools", relief="raised", width=10)
         self.tools_menu = tk.Menu(self.tools_btn, tearoff=0)
-        self.tools_menu.add_command(label="Export table to CSV...", command=self.export_csv)
-        self.tools_menu.add_command(label="Import table from CSV...", command=self.import_csv_table)
-        self.tools_menu.add_separator()
-        self.tools_menu.add_command(label="Export all tables to folder...", command=self.export_all_csv)
-        self.tools_menu.add_command(label="Import all tables from folder...", command=self.import_all_csv)
+
+        # Career submenu
+        self.career_menu = tk.Menu(self.tools_menu, tearoff=0)
+        self.career_menu.add_command(label="Change team budget...", command=self.change_team_budget)
+        self.tools_menu.add_cascade(label="Career", menu=self.career_menu)
+
+        # Export submenu
+        self.export_menu = tk.Menu(self.tools_menu, tearoff=0)
+        self.export_menu.add_command(label="Export table to CSV...", command=self.export_csv)
+        self.export_menu.add_command(label="Import table from CSV...", command=self.import_csv_table)
+        self.export_menu.add_separator()
+        self.export_menu.add_command(label="Export all tables to folder...", command=self.export_all_csv)
+        self.export_menu.add_command(label="Import all tables from folder...", command=self.import_all_csv)
+        self.tools_menu.add_cascade(label="Export", menu=self.export_menu)
+
         self.tools_btn.config(menu=self.tools_menu); self.tools_btn.pack(side=tk.LEFT, padx=5)
 
         self.undo_btn = tk.Button(toolbar, text="↶ Undo", command=self.undo, state="disabled")
@@ -131,6 +141,7 @@ class CDBEditor:
             if not messagebox.askyesno("Unsaved Changes", "You have unsaved changes. Are you sure you want to close?"): return
         self.db = None; self.current_table = None; self.unsaved_changes = False
         self.table_view.set_db(None)
+        self.tools_menu.entryconfig("Career", state="disabled")
         gc.collect()
         self.editor_frame.pack_forget()
         self.welcome_screen.show()
@@ -152,6 +163,7 @@ class CDBEditor:
             self.table_view.set_lookup_mode(self.lookup_var.get())
             self.sidebar.select_first_favorite()
             self.state.add_recent(path)
+            self._update_career_menu_state()
             self.welcome_screen.hide()
             self.editor_frame.pack(fill=tk.BOTH, expand=True)
             self.status.config(text=f"Loaded: {path}")
@@ -229,6 +241,65 @@ class CDBEditor:
                 self.status.config(text=f"Successfully imported all matching tables from folder")
 
             run_async(self.root, lambda: csv_io.import_from_csv(self.temp_path, folder), on_complete, "Importing all tables...")
+
+    def _update_career_menu_state(self):
+        """Enable or disable Career menu based on GAM_career_data table existence."""
+        if self.db and "GAM_career_data" in self.all_tables:
+            self.tools_menu.entryconfig("Career", state="normal")
+        else:
+            self.tools_menu.entryconfig("Career", state="disabled")
+
+    def change_team_budget(self):
+        """Open dialog to change team budget from GAM_career_data table."""
+        if not self.db:
+            return
+
+        try:
+            # Fetch current budget value for UID = 1 using direct SQL
+            import sqlite3
+            with sqlite3.connect(self.db.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Get table schema
+                cursor.execute("PRAGMA table_info([GAM_career_data])")
+                columns = [col[1] for col in cursor.fetchall()]
+
+                if "value" not in columns:
+                    messagebox.showerror("Error", "Column 'value' not found in GAM_career_data table")
+                    return
+
+                # Fetch the row with UID = 1
+                cursor.execute("SELECT value FROM [GAM_career_data] WHERE UID = 1")
+                row = cursor.fetchone()
+
+                if not row:
+                    messagebox.showerror("Error", "No career data found (UID = 1 not found in GAM_career_data)")
+                    return
+
+                current_value = row[0]
+
+            # Open input dialog
+            new_value = simpledialog.askinteger(
+                "Change Team Budget",
+                "Enter new team budget:",
+                initialvalue=current_value,
+                minvalue=0,
+                parent=self.root
+            )
+
+            if new_value is not None:  # User clicked OK (not Cancel)
+                # Update the database
+                self.db.update_cell("GAM_career_data", "value", new_value, "UID", 1)
+                self.unsaved_changes = True
+
+                # Refresh table if it's currently displayed
+                if self.table_view.current_table == "GAM_career_data":
+                    self.table_view.load_table_data()
+
+                self.status.config(text=f"Team budget updated to {new_value}")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to update budget: {str(e)}")
 
     def on_close(self):
         is_maximized = False
