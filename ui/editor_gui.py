@@ -55,6 +55,9 @@ class CDBEditor:
         self.tools_menu = tk.Menu(self.tools_btn, tearoff=0)
         self.tools_menu.add_command(label="Export table to CSV...", command=self.export_csv)
         self.tools_menu.add_command(label="Import table from CSV...", command=self.import_csv_table)
+        self.tools_menu.add_separator()
+        self.tools_menu.add_command(label="Export all tables to folder...", command=self.export_all_csv)
+        self.tools_menu.add_command(label="Import all tables from folder...", command=self.import_all_csv)
         self.tools_btn.config(menu=self.tools_menu); self.tools_btn.pack(side=tk.LEFT, padx=5)
 
         self.undo_btn = tk.Button(toolbar, text="↶ Undo", command=self.undo, state="disabled")
@@ -167,31 +170,65 @@ class CDBEditor:
 
     def save_as_cdb(self):
         path = filedialog.asksaveasfilename(defaultextension=".cdb", filetypes=[("CDB files", "*.cdb")])
-        if path: 
+        if path:
             gc.collect()
             def task(): converter.import_sqlite_to_cdb(self.temp_path, path)
-            run_async(self.root, task, lambda _: setattr(self, 'unsaved_changes', False), "Saving CDB...")
+            def on_complete(_):
+                self.unsaved_changes = False
+                self.status.config(text=f"Saved: {path}")
+            run_async(self.root, task, on_complete, "Saving CDB...")
 
     def export_csv(self):
         if not self.db: return
         if not self.table_view.current_table: return messagebox.showwarning("Warning", "No table selected.")
-        
+
         path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")], initialfile=f"{self.table_view.current_table}.csv")
         if path:
-            run_async(self.root, lambda: csv_io.export_table(self.temp_path, self.table_view.current_table, path), lambda _: None, "Exporting CSV...")
+            table_name = self.table_view.current_table
+            run_async(self.root, lambda: csv_io.export_table(self.temp_path, table_name, path),
+                     lambda _: self.status.config(text=f"Exported table '{table_name}' to CSV"),
+                     "Exporting CSV...")
 
     def import_csv_table(self):
         if not self.db: return
         if not self.table_view.current_table: return messagebox.showwarning("Warning", "No table selected.")
-        
+
         path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
         if path:
             if not messagebox.askyesno("Confirm Import", f"This will overwrite data in '{self.table_view.current_table}' with data from the CSV. Continue?"): return
-            
+
+            table_name = self.table_view.current_table
             def on_complete(_):
                 self.unsaved_changes = True
                 self.table_view.load_table_data()
-            run_async(self.root, lambda: csv_io.import_table_from_csv(self.temp_path, self.table_view.current_table, path), on_complete, "Importing CSV...")
+                self.status.config(text=f"Imported CSV data into table '{table_name}'")
+            run_async(self.root, lambda: csv_io.import_table_from_csv(self.temp_path, table_name, path), on_complete, "Importing CSV...")
+
+    def export_all_csv(self):
+        if not self.db: return
+
+        folder = filedialog.askdirectory(title="Select folder to export all tables")
+        if folder:
+            run_async(self.root, lambda: csv_io.export_to_csv(self.temp_path, folder),
+                     lambda _: self.status.config(text=f"Successfully exported all tables to folder"),
+                     "Exporting all tables...")
+
+    def import_all_csv(self):
+        if not self.db: return
+
+        folder = filedialog.askdirectory(title="Select folder containing CSV files")
+        if folder:
+            if not messagebox.askyesno("Confirm Import",
+                                      "This will overwrite data in ALL matching tables with data from CSV files in the selected folder. Continue?"):
+                return
+
+            def on_complete(_):
+                self.unsaved_changes = True
+                if self.table_view.current_table:
+                    self.table_view.load_table_data()
+                self.status.config(text=f"Successfully imported all matching tables from folder")
+
+            run_async(self.root, lambda: csv_io.import_from_csv(self.temp_path, folder), on_complete, "Importing all tables...")
 
     def on_close(self):
         is_maximized = False
