@@ -135,9 +135,9 @@ class CDBEditor:
             self.temp_path = temp_path
             self.db = DatabaseManager(self.temp_path); self.all_tables = self.db.get_table_list()
             self.sidebar.set_tables(self.all_tables); self.state.settings["last_path"] = os.path.dirname(path)
-            self.sidebar.select_first_favorite()
             self.table_view.set_db(self.db)
             self.table_view.set_lookup_mode(self.lookup_var.get())
+            self.sidebar.select_first_favorite()
             self.state.add_recent(path)
             self.welcome_screen.hide()
             self.editor_frame.pack(fill=tk.BOTH, expand=True)
