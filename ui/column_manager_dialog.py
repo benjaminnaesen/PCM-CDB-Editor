@@ -44,8 +44,8 @@ class ColumnManagerDialog:
         self.preset_combo.pack(side=tk.LEFT, padx=5)
         self.update_preset_list()
 
-        tk.Button(preset_frame, text="Load", command=self.load_preset, width=8).pack(side=tk.LEFT, padx=2)
         tk.Button(preset_frame, text="Save", command=self.save_preset, width=8).pack(side=tk.LEFT, padx=2)
+        tk.Button(preset_frame, text="Load", command=self.load_preset, width=8).pack(side=tk.LEFT, padx=2)
         tk.Button(preset_frame, text="Delete", command=self.delete_preset, width=8).pack(side=tk.LEFT, padx=2)
 
         # Search box

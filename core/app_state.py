@@ -104,6 +104,16 @@ class AppState:
         self.undo_stack.append({"table": table, "column": col, "old": old, "new": new, "pk": pk})
         self.redo_stack.clear()
 
+    def push_action(self, action):
+        """
+        Push a generic action dictionary to the undo stack.
+        
+        Args:
+            action (dict): Dictionary containing action details (type, table, etc.)
+        """
+        self.undo_stack.append(action)
+        self.redo_stack.clear()
+
     def undo(self):
         """
         Pop the most recent action from undo stack and add to redo stack.

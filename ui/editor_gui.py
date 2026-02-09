@@ -69,18 +69,23 @@ class CDBEditor:
         self.export_menu.add_command(label="Import all tables from folder...", command=self.import_all_csv)
         self.tools_menu.add_cascade(label="Export", menu=self.export_menu)
 
-        self.tools_btn.config(menu=self.tools_menu); self.tools_btn.pack(side=tk.LEFT, padx=5)
+        self.tools_btn.config(menu=self.tools_menu)
 
         self.undo_btn = tk.Button(toolbar, text="↶ Undo", command=self.undo, state="disabled")
         self.undo_btn.pack(side=tk.LEFT, padx=5)
         self.redo_btn = tk.Button(toolbar, text="↷ Redo", command=self.redo, state="disabled")
         self.redo_btn.pack(side=tk.LEFT, padx=5)
-        tk.Button(toolbar, text="Columns", command=self.open_column_manager, width=10).pack(side=tk.LEFT, padx=5)
+        tk.Button(toolbar, text="Add Row", command=lambda: self.table_view.add_row(), width=12).pack(side=tk.LEFT, padx=5)
+        tk.Button(toolbar, text="Remove Row", command=lambda: self.table_view.delete_row(), width=12).pack(side=tk.LEFT, padx=5)
+        tk.Button(toolbar, text="Clear Table", command=self.clear_table, width=12).pack(side=tk.LEFT, padx=5)
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", self.on_search)
         self._create_search_box(toolbar, self.search_var, 40).pack(side=tk.RIGHT, padx=15)
         self.lookup_var = tk.BooleanVar(value=self.state.settings.get("lookup_mode", False))
-        tk.Checkbutton(toolbar, text="Lookup Mode", variable=self.lookup_var, command=self.toggle_lookup).pack(side=tk.RIGHT, padx=5)
+        self.lookup_btn = tk.Button(toolbar, text="Lookup: ON" if self.lookup_var.get() else "Lookup: OFF", command=self.toggle_lookup, width=12)
+        self.lookup_btn.pack(side=tk.RIGHT, padx=5)
+        tk.Button(toolbar, text="Columns", command=self.open_column_manager, width=10).pack(side=tk.RIGHT, padx=5)
+        self.tools_btn.pack(side=tk.RIGHT, padx=5)
 
         self.pw = tk.PanedWindow(self.editor_frame, orient=tk.HORIZONTAL, sashwidth=4, bg="#ccc")
         self.pw.pack(expand=True, fill=tk.BOTH)
@@ -114,7 +119,10 @@ class CDBEditor:
         self.search_timer = None
 
     def toggle_lookup(self):
-        self.table_view.set_lookup_mode(self.lookup_var.get())
+        new_state = not self.lookup_var.get()
+        self.lookup_var.set(new_state)
+        self.lookup_btn.config(text="Lookup: ON" if new_state else "Lookup: OFF")
+        self.table_view.set_lookup_mode(new_state)
 
     def on_data_change(self):
         self.unsaved_changes = True
@@ -122,17 +130,50 @@ class CDBEditor:
 
     def undo(self):
         action = self.state.undo()
-        if action: 
+        if not action: return
+        
+        if action.get("type") == "row_op":
+            self._handle_row_op(action, is_undo=True)
+        else:
             self.db.update_cell(action["table"], action["column"], action["old"], self.table_view.tree["columns"][0], action["pk"])
             self.unsaved_changes = True; self.table_view.load_table_data()
         self._update_btns()
 
     def redo(self):
         action = self.state.redo()
-        if action: 
+        if not action: return
+        
+        if action.get("type") == "row_op":
+            self._handle_row_op(action, is_undo=False)
+        else:
             self.db.update_cell(action["table"], action["column"], action["new"], self.table_view.tree["columns"][0], action["pk"])
             self.unsaved_changes = True; self.table_view.load_table_data()
         self._update_btns()
+
+    def _handle_row_op(self, action, is_undo):
+        table = action["table"]
+        mode = action["mode"]
+        rows = action["rows"]
+        pk_col = action["pk_col"]
+        columns = action["columns"]
+
+        # Determine effective operation
+        # Undo Insert -> Delete | Redo Insert -> Insert
+        # Undo Delete -> Insert | Redo Delete -> Delete
+        effective_op = "delete" if (mode == "insert" and is_undo) or (mode == "delete" and not is_undo) else "insert"
+
+        try:
+            if effective_op == "delete":
+                self.db.delete_rows(table, pk_col, [r["pk"] for r in rows])
+            else:
+                for r in rows:
+                    self.db.insert_row(table, columns, r["data"])
+
+            self.unsaved_changes = True
+            self.table_view.load_table_data()
+        except Exception as e:
+            operation = "undo" if is_undo else "redo"
+            messagebox.showerror("Error", f"Failed to {operation} operation: {str(e)}")
 
     def _update_btns(self):
         self.undo_btn.config(state="normal" if self.state.undo_stack else "disabled")
@@ -310,7 +351,66 @@ class CDBEditor:
             return
         ColumnManagerDialog(self.root, self.table_view, self.state)
 
+    def clear_table(self):
+        """Clear all rows from the current table."""
+        if not self.db or not self.table_view.current_table:
+            messagebox.showwarning("No Table", "Please select a table first.")
+            return
+
+        try:
+            table_name = self.table_view.current_table
+            total_rows = self.db.get_row_count(table_name)
+
+            if total_rows == 0:
+                messagebox.showinfo("Empty Table", "This table is already empty.")
+                return
+
+            if not messagebox.askyesno("Confirm Clear Table",
+                                      f"This will delete ALL {total_rows} rows from '{table_name}'.\n\nThis action can be undone.\n\nContinue?"):
+                return
+
+            # Get all columns and primary key
+            columns, _ = self.db.fetch_data(table_name, limit=0)
+            pk_col = columns[0]
+
+            # Fetch ALL rows for undo (no limit)
+            _, all_rows = self.db.fetch_data(table_name, limit=None)
+
+            # Capture data for undo
+            deleted_rows = []
+            for row in all_rows:
+                pk = row[0]
+                data = list(self.db.get_row_data(table_name, pk_col, pk))
+                if data:
+                    deleted_rows.append({"pk": pk, "data": data})
+
+            # Delete all rows
+            pk_vals = [row[0] for row in all_rows]
+            self.db.delete_rows(table_name, pk_col, pk_vals)
+
+            # Push undo action
+            if deleted_rows:
+                action = {
+                    "type": "row_op",
+                    "mode": "delete",
+                    "table": table_name,
+                    "pk_col": pk_col,
+                    "columns": columns,
+                    "rows": deleted_rows
+                }
+                self.state.push_action(action)
+
+            self.unsaved_changes = True
+            self.table_view.load_table_data()
+            self._update_btns()
+            self.status.config(text=f"Cleared {len(deleted_rows)} rows from '{table_name}'")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to clear table: {str(e)}")
+
     def on_close(self):
+        if self.unsaved_changes:
+            if not messagebox.askyesno("Unsaved Changes", "You have unsaved changes. Are you sure you want to exit?"): return
         is_maximized = False
         try: is_maximized = self.root.state() == 'zoomed' if sys.platform.startswith('win') else self.root.attributes('-zoomed')
         except: pass

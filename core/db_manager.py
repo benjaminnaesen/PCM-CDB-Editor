@@ -153,6 +153,23 @@ class DatabaseManager:
             result = cursor.fetchone()[0]
             return (int(result) if result is not None else 0) + 1
 
+    def get_row_data(self, table, pk_col, pk_val):
+        """
+        Get full row data for a specific primary key.
+
+        Args:
+            table (str): Table name
+            pk_col (str): Primary key column name
+            pk_val: Primary key value
+
+        Returns:
+            tuple: Row values
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT * FROM [{table}] WHERE [{pk_col}]=?", (pk_val,))
+            return cursor.fetchone()
+
     def update_cell(self, table, column, value, pk_col, pk_val):
         """
         Update a single cell in the database.
@@ -185,6 +202,23 @@ class DatabaseManager:
         """
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(f"DELETE FROM [{table}] WHERE [{pk_col}]=?", (pk_val,))
+            conn.commit()
+
+    def delete_rows(self, table, pk_col, pk_vals):
+        """
+        Delete multiple rows from the database.
+
+        Args:
+            table (str): Table name
+            pk_col (str): Primary key column name
+            pk_vals (list): List of primary key values to delete
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            chunk_size = 900  # SQLite limit safety
+            for i in range(0, len(pk_vals), chunk_size):
+                chunk = pk_vals[i:i + chunk_size]
+                placeholders = ", ".join(["?"] * len(chunk))
+                conn.execute(f"DELETE FROM [{table}] WHERE [{pk_col}] IN ({placeholders})", chunk)
             conn.commit()
 
     def insert_row(self, table, columns, values):

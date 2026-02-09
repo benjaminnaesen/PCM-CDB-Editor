@@ -24,7 +24,7 @@ class TableView:
         self._create_menu()
 
     def _setup_ui(self):
-        self.tree = ttk.Treeview(self.parent, show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(self.parent, show="headings", selectmode="extended")
         self.tree.tag_configure('oddrow', background="#f4f4f4"); self.tree.tag_configure('evenrow', background="#ffffff")
         self.vsb = ttk.Scrollbar(self.parent, command=self.tree.yview); hsb = ttk.Scrollbar(self.parent, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=self.on_tree_scroll, xscrollcommand=hsb.set)
@@ -35,6 +35,7 @@ class TableView:
         self.tree.bind("<ButtonRelease-1>", self.on_single_click)
         self.tree.bind("<Button-1>", self.on_tree_click)
         self.tree.bind("<ButtonRelease-1>", self.on_column_resize, add='+')
+        self.tree.bind("<Control-a>", self.select_all_rows)
 
         # Bind right-click on heading for column menu
         self.tree.bind("<Button-3>", self.on_right_click, add='+')
@@ -74,13 +75,21 @@ class TableView:
         self.sort_state = {"column": col, "reverse": reverse}
         self.load_table_data()
 
-    def load_table_data(self):
+    def load_table_data(self, start_offset=0):
         if self.active_editor: self.cancel_edit()
         if not self.current_table or not self.db: return
         self.tree.grid_remove()
-        self.offset = 0
+        self.offset = start_offset
         self.total_rows = self.db.get_row_count(self.current_table, self.search_term)
-        columns, row_data = self.db.fetch_data(self.current_table, self.search_term, self.lookup_mode, self.page_size, 0, self.sort_state["column"], self.sort_state["reverse"])
+
+        # Set default sort to first column (primary key) if not set
+        if self.sort_state["column"] is None:
+            # Get columns first to determine the default sort column
+            temp_columns, _ = self.db.fetch_data(self.current_table, limit=0)
+            if temp_columns:
+                self.sort_state = {"column": temp_columns[0], "reverse": False}
+
+        columns, row_data = self.db.fetch_data(self.current_table, self.search_term, self.lookup_mode, self.page_size, self.offset, self.sort_state["column"], self.sort_state["reverse"])
         self.offset += len(row_data)
 
         # Store all columns (including hidden ones)
@@ -230,27 +239,159 @@ class TableView:
         self.editing_data = {'col_name': col_name, 'pk_val': pk_val, 'old_val': old_val, 'fk_options': fk_options, 'item': item, 'index': index, 'values': values}
         for k, v in {"<Return>": lambda e: self.commit_editor(), "<FocusOut>": lambda e: self.commit_editor(), "<Escape>": self.cancel_edit, "<Tab>": self.on_editor_navigate, "<Up>": self.on_editor_navigate, "<Down>": self.on_editor_navigate}.items(): self.active_editor.bind(k, v)
 
+    def add_row(self):
+        """Add a new empty row to the current table."""
+        if not self.current_table or not self.db:
+            return
+        try:
+            if not self.all_columns:
+                return
+
+            new_id = self.db.get_max_id(self.current_table, self.all_columns[0])
+            row_values = [new_id] + [""] * (len(self.all_columns) - 1)
+            self.db.insert_row(self.current_table, self.all_columns, row_values)
+
+            # Push undo action
+            action = {
+                "type": "row_op",
+                "mode": "insert",
+                "table": self.current_table,
+                "pk_col": self.all_columns[0],
+                "columns": self.all_columns,
+                "rows": [{"pk": new_id, "data": row_values}]
+            }
+            self.state.push_action(action)
+
+            # Mark as changed (updates undo/redo buttons)
+            self.on_change()
+
+            # If sorting by default (PK ASC) or explicitly PK ASC, jump to bottom
+            start_offset = 0
+            if not self.sort_state["column"] or (self.sort_state["column"] == self.all_columns[0] and not self.sort_state["reverse"]):
+                total_rows = self.db.get_row_count(self.current_table, self.search_term)
+                if total_rows > self.page_size:
+                    start_offset = total_rows - self.page_size
+            
+            self.load_table_data(start_offset=start_offset)
+
+            # Find and select the new row, then edit the second column
+            for item in self.tree.get_children():
+                vals = self.tree.item(item, "values")
+                if vals and str(vals[0]) == str(new_id):
+                    self.tree.selection_set(item); self.tree.see(item); self.tree.focus(item)
+                    if len(self.tree["columns"]) > 1:
+                        self.edit_cell(item, "#2")
+                    break
+        except Exception as e: messagebox.showerror("Error", str(e))
+
     def duplicate_row(self):
         selection = self.tree.selection()
         if not selection: return
-        row_values, tree_index = list(self.tree.item(selection[0], "values")), self.tree.index(selection[0])
+
+        added_rows = []
         try:
-            columns, _ = self.db.fetch_data(self.current_table); row_values[0] = self.db.get_max_id(self.current_table, columns[0])
-            self.db.insert_row(self.current_table, columns, row_values); self.on_change()
-            tag = 'evenrow' if (tree_index + 1) % 2 == 0 else 'oddrow'
-            new_item = self.tree.insert("", tree_index + 1, values=row_values, tags=(tag,))
-            self.tree.selection_set(new_item); self.tree.see(new_item)
+            columns, _ = self.db.fetch_data(self.current_table, limit=0)
+            pk_col = columns[0]
+
+            for item in selection:
+                # Get original PK to fetch full data (preserves types better than tree values)
+                pk_val = self.tree.item(item, "values")[0]
+                row_data = list(self.db.get_row_data(self.current_table, pk_col, pk_val))
+
+                # Generate new ID and insert
+                new_id = self.db.get_max_id(self.current_table, pk_col)
+                row_data[0] = new_id
+                self.db.insert_row(self.current_table, columns, row_data)
+                added_rows.append({"pk": new_id, "data": row_data})
+
+            if added_rows:
+                # Push undo action
+                action = {
+                    "type": "row_op",
+                    "mode": "insert",
+                    "table": self.current_table,
+                    "pk_col": pk_col,
+                    "columns": columns,
+                    "rows": added_rows
+                }
+                self.state.push_action(action)
+
+                # Mark as changed (updates undo/redo buttons)
+                self.on_change()
+
+                # Jump to last row if sorting by PK ASC (default or explicit)
+                start_offset = 0
+                if not self.sort_state["column"] or (self.sort_state["column"] == pk_col and not self.sort_state["reverse"]):
+                    total_rows = self.db.get_row_count(self.current_table, self.search_term)
+                    if total_rows > self.page_size:
+                        start_offset = total_rows - self.page_size
+
+                self.load_table_data(start_offset=start_offset)
+
+                # Select the last duplicated row
+                last_new_id = added_rows[-1]["pk"]
+                for item in self.tree.get_children():
+                    vals = self.tree.item(item, "values")
+                    if vals and str(vals[0]) == str(last_new_id):
+                        self.tree.selection_set(item)
+                        self.tree.see(item)
+                        self.tree.focus(item)
+                        break
+
         except Exception as e: messagebox.showerror("Error", str(e))
 
     def delete_row(self):
         selection = self.tree.selection()
-        if selection and messagebox.askyesno("Confirm", "Delete?"):
-            self.db.delete_row(self.current_table, self.tree["columns"][0], self.tree.item(selection[0], "values")[0])
-            self.on_change(); self.load_table_data()
+        if not selection: return
+        if messagebox.askyesno("Confirm", f"Delete {len(selection)} row(s)?"):
+            # Get all columns and primary key from database
+            columns, _ = self.db.fetch_data(self.current_table, limit=0)
+            pk_col = columns[0]
+
+            # Get PK values from selected rows
+            pk_vals = [self.tree.item(item, "values")[0] for item in selection]
+
+            # Capture data for undo before deleting
+            deleted_rows = []
+            for pk in pk_vals:
+                data = self.db.get_row_data(self.current_table, pk_col, pk)
+                if data:
+                    deleted_rows.append({"pk": pk, "data": list(data)})
+
+            # Delete rows using consistent pk_col
+            self.db.delete_rows(self.current_table, pk_col, pk_vals)
+
+            # Push undo action before updating UI
+            if deleted_rows:
+                action = {
+                    "type": "row_op",
+                    "mode": "delete",
+                    "table": self.current_table,
+                    "pk_col": pk_col,
+                    "columns": columns,
+                    "rows": deleted_rows
+                }
+                self.state.push_action(action)
+
+            # Mark as changed (updates undo/redo buttons) and refresh
+            self.on_change()
+            self.load_table_data()
 
     def show_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)
-        if row_id: self.tree.selection_set(row_id); self.row_menu.post(event.x_root, event.y_root)
+        if row_id:
+            if row_id not in self.tree.selection():
+                self.tree.selection_set(row_id)
+
+            # Update menu labels based on selection count
+            selection_count = len(self.tree.selection())
+            duplicate_label = "Duplicate Rows" if selection_count > 1 else "Duplicate Row"
+            delete_label = "Delete Rows" if selection_count > 1 else "Delete Row"
+
+            self.row_menu.entryconfig(0, label=duplicate_label)
+            self.row_menu.entryconfig(1, label=delete_label)
+
+            self.row_menu.post(event.x_root, event.y_root)
 
     def on_right_click(self, event):
         """Handle right-click to show column menu on headers."""
@@ -294,3 +435,10 @@ class TableView:
             return
         self.state.set_visible_columns(self.current_table, columns)
         self.load_table_data()
+
+    def select_all_rows(self, event=None):
+        """Select all rows in the table."""
+        items = self.tree.get_children()
+        if items:
+            self.tree.selection_set(items)
+        return "break"  # Prevent default behavior
