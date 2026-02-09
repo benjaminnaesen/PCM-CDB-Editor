@@ -1,4 +1,5 @@
 import sqlite3
+from core.constants import DB_CHUNK_SIZE
 
 class DatabaseManager:
     """
@@ -37,6 +38,30 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
             return [row[0] for row in cursor.fetchall()]
+
+    def get_columns(self, table_name):
+        """
+        Fast retrieval of column names for a table using cache.
+
+        Args:
+            table_name (str): Name of the table
+
+        Returns:
+            list[str]: List of column names
+
+        Notes:
+            Uses schema_cache for performance. This method is optimized
+            for UI operations that only need column metadata without data.
+        """
+        if table_name in self.schema_cache:
+            return self.schema_cache[table_name]
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"PRAGMA table_info([{table_name}])")
+            columns = [col[1] for col in cursor.fetchall()]
+            self.schema_cache[table_name] = columns
+            return columns
 
     def fetch_data(self, table_name, search_term=None, lookup=False, limit=None, offset=0, sort_col=None, sort_reverse=False):
         """
@@ -214,7 +239,7 @@ class DatabaseManager:
             pk_vals (list): List of primary key values to delete
         """
         with sqlite3.connect(self.db_path) as conn:
-            chunk_size = 900  # SQLite limit safety
+            chunk_size = DB_CHUNK_SIZE  # SQLite limit safety
             for i in range(0, len(pk_vals), chunk_size):
                 chunk = pk_vals[i:i + chunk_size]
                 placeholders = ", ".join(["?"] * len(chunk))

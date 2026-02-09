@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+from core.constants import PAGE_SIZE, SEARCH_DEBOUNCE_DELAY, DEFAULT_COLUMN_WIDTH, RESIZE_SAVE_DELAY
 
 class TableView:
     def __init__(self, parent, app_state, on_change_callback):
@@ -15,7 +16,7 @@ class TableView:
         self.active_editor = None
         self.editing_data = {}
         self.sort_state = {"column": None, "reverse": False}
-        self.page_size = 50
+        self.page_size = PAGE_SIZE
         self.offset, self.total_rows, self.loading_data = 0, 0, False
         self.last_saved_widths = {}
         self.all_columns = []  # Store all columns including hidden ones
@@ -85,7 +86,7 @@ class TableView:
         # Set default sort to first column (primary key) if not set
         if self.sort_state["column"] is None:
             # Get columns first to determine the default sort column
-            temp_columns, _ = self.db.fetch_data(self.current_table, limit=0)
+            temp_columns = self.db.get_columns(self.current_table)
             if temp_columns:
                 self.sort_state = {"column": temp_columns[0], "reverse": False}
 
@@ -118,7 +119,7 @@ class TableView:
             prefix = ("▼ " if self.sort_state["reverse"] else "▲ ") if col == self.sort_state["column"] else ""
             self.tree.heading(col, text=prefix + col, command=lambda _c=col: self.sort_column(_c, not self.sort_state["reverse"] if _c == self.sort_state["column"] else False))
             # Use saved width if available, otherwise default to 140
-            width = saved_widths.get(col, 140) if saved_widths else 140
+            width = saved_widths.get(col, DEFAULT_COLUMN_WIDTH) if saved_widths else DEFAULT_COLUMN_WIDTH
             self.tree.column(col, width=width, stretch=False)
             current_widths[col] = width
 
@@ -126,10 +127,7 @@ class TableView:
         self.last_saved_widths = current_widths.copy()
 
         # Filter row data to only include visible columns
-        filtered_rows = []
-        for row in row_data:
-            filtered_row = tuple(row[i] for i in visible_indices)
-            filtered_rows.append(filtered_row)
+        filtered_rows = [tuple(row[i] for i in visible_indices) for row in row_data]
 
         self.tree.delete(*self.tree.get_children())
         for index, row in enumerate(filtered_rows): self.tree.insert("", "end", values=row, tags=('evenrow' if index%2==0 else 'oddrow'))
@@ -290,7 +288,7 @@ class TableView:
 
         added_rows = []
         try:
-            columns, _ = self.db.fetch_data(self.current_table, limit=0)
+            columns = self.db.get_columns(self.current_table)
             pk_col = columns[0]
 
             for item in selection:
@@ -345,7 +343,7 @@ class TableView:
         if not selection: return
         if messagebox.askyesno("Confirm", f"Delete {len(selection)} row(s)?"):
             # Get all columns and primary key from database
-            columns, _ = self.db.fetch_data(self.current_table, limit=0)
+            columns = self.db.get_columns(self.current_table)
             pk_col = columns[0]
 
             # Get PK values from selected rows

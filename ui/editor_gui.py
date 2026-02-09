@@ -3,6 +3,7 @@ from tkinter import filedialog, ttk, messagebox, simpledialog
 import gc, os, sys
 from core.db_manager import DatabaseManager
 from core.app_state import AppState
+from core.constants import SEARCH_DEBOUNCE_DELAY
 import core.converter as converter
 import core.csv_io as csv_io
 from ui.welcome_screen import WelcomeScreen
@@ -111,8 +112,8 @@ class CDBEditor:
         if self.search_timer:
             self.root.after_cancel(self.search_timer)
 
-        # Schedule new search after 300ms of no input
-        self.search_timer = self.root.after(300, self._execute_search)
+        # Schedule new search after delay
+        self.search_timer = self.root.after(SEARCH_DEBOUNCE_DELAY, self._execute_search)
 
     def _execute_search(self):
         self.table_view.set_search_term(self.search_var.get())
@@ -370,7 +371,7 @@ class CDBEditor:
                 return
 
             # Get all columns and primary key
-            columns, _ = self.db.fetch_data(table_name, limit=0)
+            columns = self.db.get_columns(table_name)
             pk_col = columns[0]
 
             # Fetch ALL rows for undo (no limit)

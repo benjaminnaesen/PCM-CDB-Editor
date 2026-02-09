@@ -1,4 +1,5 @@
 import tkinter as tk
+from core.constants import FILTER_DEBOUNCE_DELAY
 
 class Sidebar:
     def __init__(self, parent, app_state, on_table_select):
@@ -49,8 +50,8 @@ class Sidebar:
         if self.filter_timer:
             self.parent.winfo_toplevel().after_cancel(self.filter_timer)
 
-        # Schedule new filter after 200ms of no input (faster than main search since it's in-memory)
-        self.filter_timer = self.parent.winfo_toplevel().after(200, self._execute_filter)
+        # Schedule new filter after delay (faster than main search since it's in-memory)
+        self.filter_timer = self.parent.winfo_toplevel().after(FILTER_DEBOUNCE_DELAY, self._execute_filter)
 
     def _execute_filter(self):
         term = self.filter_var.get().lower()

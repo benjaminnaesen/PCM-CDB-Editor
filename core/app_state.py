@@ -1,4 +1,5 @@
 import json, os
+from core.constants import MAX_RECENT_FILES
 
 class AppState:
     """
@@ -70,7 +71,7 @@ class AppState:
 
     def add_recent(self, path):
         """
-        Add file path to recent files list (maximum 10 entries).
+        Add file path to recent files list (maximum entries defined by MAX_RECENT_FILES).
 
         Args:
             path (str): File path to add
@@ -78,14 +79,14 @@ class AppState:
         Side Effects:
             - Removes duplicate if path already exists
             - Inserts path at the beginning (most recent first)
-            - Truncates list to 10 most recent files
+            - Truncates list to MAX_RECENT_FILES most recent files
 
         Notes:
             Most recently added files appear first in the list.
         """
         if path in self.recents: self.recents.remove(path)
         self.recents.insert(0, path)
-        self.recents = self.recents[:10]
+        self.recents = self.recents[:MAX_RECENT_FILES]
 
     def push_undo(self, table, col, old, new, pk):
         """
