@@ -7,7 +7,8 @@ class Sidebar:
         self.on_table_select = on_table_select
         self.all_tables = []
         self.sidebar_even, self.sidebar_odd, self.fav_color = "#e8e8e8", "#fdfdfd", "#fff9c4"
-        
+        self.filter_timer = None
+
         self._setup_ui()
         self._create_menu()
 
@@ -40,15 +41,24 @@ class Sidebar:
 
     def set_tables(self, tables):
         self.all_tables = tables
-        self.filter_list()
+        self._execute_filter()  # Execute immediately when setting tables, not debounced
         self.refresh_favorites()
 
     def filter_list(self, *args):
+        # Cancel previous filter timer if user is still typing
+        if self.filter_timer:
+            self.parent.winfo_toplevel().after_cancel(self.filter_timer)
+
+        # Schedule new filter after 200ms of no input (faster than main search since it's in-memory)
+        self.filter_timer = self.parent.winfo_toplevel().after(200, self._execute_filter)
+
+    def _execute_filter(self):
         term = self.filter_var.get().lower()
         self.listbox.delete(0, "end")
         for index, table in enumerate([t for t in self.all_tables if term in t.lower()]):
             self.listbox.insert("end", table)
             self.listbox.itemconfig(index, {'bg': self.sidebar_even if index % 2 == 0 else self.sidebar_odd})
+        self.filter_timer = None
 
     def refresh_favorites(self):
         self.fav_lb.delete(0, "end")

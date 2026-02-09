@@ -27,6 +27,7 @@ class CDBEditor:
         self.root.bind("<Configure>", self.track_window_size)
         self.db, self.temp_path, self.current_table = None, None, None
         self.unsaved_changes = False
+        self.search_timer = None
 
         self._setup_ui()
         self.root.bind("<Control-z>", lambda e: self.undo())
@@ -86,7 +87,16 @@ class CDBEditor:
         self.welcome_screen.show()
 
     def on_search(self, *args):
+        # Cancel previous search timer if user is still typing
+        if self.search_timer:
+            self.root.after_cancel(self.search_timer)
+
+        # Schedule new search after 300ms of no input
+        self.search_timer = self.root.after(300, self._execute_search)
+
+    def _execute_search(self):
         self.table_view.set_search_term(self.search_var.get())
+        self.search_timer = None
 
     def toggle_lookup(self):
         self.table_view.set_lookup_mode(self.lookup_var.get())
