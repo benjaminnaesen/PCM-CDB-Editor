@@ -9,6 +9,7 @@ from ui.welcome_screen import WelcomeScreen
 from ui.ui_utils import run_async
 from ui.sidebar import Sidebar
 from ui.table_view import TableView
+from ui.column_manager_dialog import ColumnManagerDialog
 
 class CDBEditor:
     def __init__(self, root):
@@ -74,6 +75,7 @@ class CDBEditor:
         self.undo_btn.pack(side=tk.LEFT, padx=5)
         self.redo_btn = tk.Button(toolbar, text="↷ Redo", command=self.redo, state="disabled")
         self.redo_btn.pack(side=tk.LEFT, padx=5)
+        tk.Button(toolbar, text="Columns", command=self.open_column_manager, width=10).pack(side=tk.LEFT, padx=5)
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", self.on_search)
         self._create_search_box(toolbar, self.search_var, 40).pack(side=tk.RIGHT, padx=15)
@@ -300,6 +302,13 @@ class CDBEditor:
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to update budget: {str(e)}")
+
+    def open_column_manager(self):
+        """Open the column manager dialog."""
+        if not self.db or not self.table_view.current_table:
+            messagebox.showwarning("No Table", "Please select a table first.")
+            return
+        ColumnManagerDialog(self.root, self.table_view, self.state)
 
     def on_close(self):
         is_maximized = False

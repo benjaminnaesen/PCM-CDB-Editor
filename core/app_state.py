@@ -24,6 +24,8 @@ class AppState:
         self.favorites = self.settings.get("favorites", [])
         self.recents = self.settings.get("recents", [])
         self.column_widths = self.settings.get("column_widths", {})
+        self.column_visibility = self.settings.get("column_visibility", {})
+        self.column_presets = self.settings.get("column_presets", {})
 
     def load_settings(self):
         """
@@ -58,6 +60,8 @@ class AppState:
         self.settings["favorites"] = self.favorites
         self.settings["recents"] = self.recents
         self.settings["column_widths"] = self.column_widths
+        self.settings["column_visibility"] = self.column_visibility
+        self.settings["column_presets"] = self.column_presets
         self.settings["window_size"] = window_geometry
         self.settings["is_maximized"] = is_maximized
         self.settings["lookup_mode"] = lookup_mode
@@ -147,3 +151,61 @@ class AppState:
             widths (dict): Dictionary mapping column names to widths
         """
         self.column_widths[table_name] = widths
+
+    def get_visible_columns(self, table_name):
+        """
+        Get list of visible columns for a specific table.
+
+        Args:
+            table_name (str): Name of the table
+
+        Returns:
+            list or None: List of visible column names, or None if not set (show all)
+        """
+        return self.column_visibility.get(table_name)
+
+    def set_visible_columns(self, table_name, columns):
+        """
+        Save visible columns for a specific table.
+
+        Args:
+            table_name (str): Name of the table
+            columns (list): List of visible column names
+        """
+        self.column_visibility[table_name] = columns
+
+    def get_column_presets(self, table_name):
+        """
+        Get saved column presets for a specific table.
+
+        Args:
+            table_name (str): Name of the table
+
+        Returns:
+            dict: Dictionary mapping preset names to column lists
+        """
+        return self.column_presets.get(table_name, {})
+
+    def save_column_preset(self, table_name, preset_name, columns):
+        """
+        Save a column preset for a specific table.
+
+        Args:
+            table_name (str): Name of the table
+            preset_name (str): Name of the preset
+            columns (list): List of column names in this preset
+        """
+        if table_name not in self.column_presets:
+            self.column_presets[table_name] = {}
+        self.column_presets[table_name][preset_name] = columns
+
+    def delete_column_preset(self, table_name, preset_name):
+        """
+        Delete a column preset.
+
+        Args:
+            table_name (str): Name of the table
+            preset_name (str): Name of the preset to delete
+        """
+        if table_name in self.column_presets and preset_name in self.column_presets[table_name]:
+            del self.column_presets[table_name][preset_name]

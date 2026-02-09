@@ -11,13 +11,14 @@ class TableView:
         self.current_table = None
         self.search_term = ""
         self.lookup_mode = False
-        
+
         self.active_editor = None
         self.editing_data = {}
         self.sort_state = {"column": None, "reverse": False}
         self.page_size = 50
         self.offset, self.total_rows, self.loading_data = 0, 0, False
         self.last_saved_widths = {}
+        self.all_columns = []  # Store all columns including hidden ones
         
         self._setup_ui()
         self._create_menu()
@@ -35,10 +36,16 @@ class TableView:
         self.tree.bind("<Button-1>", self.on_tree_click)
         self.tree.bind("<ButtonRelease-1>", self.on_column_resize, add='+')
 
+        # Bind right-click on heading for column menu
+        self.tree.bind("<Button-3>", self.on_right_click, add='+')
+
     def _create_menu(self):
         self.row_menu = tk.Menu(self.parent, tearoff=0)
         self.row_menu.add_command(label="Duplicate Row", command=self.duplicate_row)
         self.row_menu.add_command(label="Delete Row", command=self.delete_row)
+
+        self.column_menu = tk.Menu(self.parent, tearoff=0)
+        self.column_menu.add_command(label="Hide Column", command=self.hide_column)
 
     def set_db(self, db):
         self.db = db
@@ -76,14 +83,29 @@ class TableView:
         columns, row_data = self.db.fetch_data(self.current_table, self.search_term, self.lookup_mode, self.page_size, 0, self.sort_state["column"], self.sort_state["reverse"])
         self.offset += len(row_data)
 
-        self.tree["columns"] = columns
+        # Store all columns (including hidden ones)
+        self.all_columns = columns
+
+        # Get visible columns setting
+        visible_columns = self.state.get_visible_columns(self.current_table)
+        if visible_columns is not None:
+            # Filter to only visible columns, preserving order from all_columns
+            display_columns = [col for col in columns if col in visible_columns]
+            # Get indices of visible columns for filtering row data
+            visible_indices = [i for i, col in enumerate(columns) if col in visible_columns]
+        else:
+            # Show all columns if no visibility setting
+            display_columns = columns
+            visible_indices = list(range(len(columns)))
+
+        self.tree["columns"] = display_columns
 
         # Get saved column widths for this table
         saved_widths = self.state.get_column_widths(self.current_table) if self.current_table else None
 
         # Track current widths for resize detection
         current_widths = {}
-        for col in columns:
+        for col in display_columns:
             prefix = ("▼ " if self.sort_state["reverse"] else "▲ ") if col == self.sort_state["column"] else ""
             self.tree.heading(col, text=prefix + col, command=lambda _c=col: self.sort_column(_c, not self.sort_state["reverse"] if _c == self.sort_state["column"] else False))
             # Use saved width if available, otherwise default to 140
@@ -94,16 +116,31 @@ class TableView:
         # Initialize last_saved_widths to current state
         self.last_saved_widths = current_widths.copy()
 
+        # Filter row data to only include visible columns
+        filtered_rows = []
+        for row in row_data:
+            filtered_row = tuple(row[i] for i in visible_indices)
+            filtered_rows.append(filtered_row)
+
         self.tree.delete(*self.tree.get_children())
-        for index, row in enumerate(row_data): self.tree.insert("", "end", values=row, tags=('evenrow' if index%2==0 else 'oddrow'))
+        for index, row in enumerate(filtered_rows): self.tree.insert("", "end", values=row, tags=('evenrow' if index%2==0 else 'oddrow'))
         self.tree.grid()
 
     def load_more_data(self):
         if not self.current_table or self.loading_data or self.offset >= self.total_rows: return
         self.loading_data = True
         _, row_data = self.db.fetch_data(self.current_table, self.search_term, self.lookup_mode, self.page_size, self.offset, self.sort_state["column"], self.sort_state["reverse"])
+
+        # Filter row data to match visible columns
+        visible_columns = self.state.get_visible_columns(self.current_table)
+        if visible_columns is not None:
+            visible_indices = [i for i, col in enumerate(self.all_columns) if col in visible_columns]
+            filtered_rows = [tuple(row[i] for i in visible_indices) for row in row_data]
+        else:
+            filtered_rows = row_data
+
         start_idx = self.offset
-        for index, row in enumerate(row_data):
+        for index, row in enumerate(filtered_rows):
             self.tree.insert("", "end", values=row, tags=('evenrow' if (start_idx + index)%2==0 else 'oddrow'))
         self.offset += len(row_data)
         self.loading_data = False
@@ -214,3 +251,46 @@ class TableView:
     def show_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)
         if row_id: self.tree.selection_set(row_id); self.row_menu.post(event.x_root, event.y_root)
+
+    def on_right_click(self, event):
+        """Handle right-click to show column menu on headers."""
+        region = self.tree.identify_region(event.x, event.y)
+        if region == "heading":
+            col_id = self.tree.identify_column(event.x)
+            if col_id:
+                index = int(col_id.replace('#', '')) - 1
+                if 0 <= index < len(self.tree["columns"]):
+                    self.clicked_column = self.tree["columns"][index]
+                    # Don't allow hiding the primary key (first column in all_columns)
+                    if self.clicked_column != self.all_columns[0]:
+                        self.column_menu.post(event.x_root, event.y_root)
+
+    def hide_column(self):
+        """Hide the clicked column."""
+        if not hasattr(self, 'clicked_column') or not self.current_table:
+            return
+
+        visible_columns = self.state.get_visible_columns(self.current_table)
+        if visible_columns is None:
+            # First time hiding, initialize with all columns
+            visible_columns = self.all_columns.copy()
+
+        if self.clicked_column in visible_columns:
+            visible_columns.remove(self.clicked_column)
+            self.state.set_visible_columns(self.current_table, visible_columns)
+            self.load_table_data()
+
+    def get_all_columns(self):
+        """Get all columns for the current table (including hidden ones)."""
+        return self.all_columns.copy() if self.all_columns else []
+
+    def get_visible_columns(self):
+        """Get currently visible columns."""
+        return list(self.tree["columns"]) if self.tree["columns"] else []
+
+    def set_visible_columns(self, columns):
+        """Set which columns should be visible."""
+        if not self.current_table:
+            return
+        self.state.set_visible_columns(self.current_table, columns)
+        self.load_table_data()
