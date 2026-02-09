@@ -23,6 +23,7 @@ class AppState:
         self.settings = self.load_settings()
         self.favorites = self.settings.get("favorites", [])
         self.recents = self.settings.get("recents", [])
+        self.column_widths = self.settings.get("column_widths", {})
 
     def load_settings(self):
         """
@@ -56,6 +57,7 @@ class AppState:
         """
         self.settings["favorites"] = self.favorites
         self.settings["recents"] = self.recents
+        self.settings["column_widths"] = self.column_widths
         self.settings["window_size"] = window_geometry
         self.settings["is_maximized"] = is_maximized
         self.settings["lookup_mode"] = lookup_mode
@@ -123,3 +125,25 @@ class AppState:
         action = self.redo_stack.pop()
         self.undo_stack.append(action)
         return action
+
+    def get_column_widths(self, table_name):
+        """
+        Get saved column widths for a specific table.
+
+        Args:
+            table_name (str): Name of the table
+
+        Returns:
+            dict or None: Dictionary mapping column names to widths, or None if not saved
+        """
+        return self.column_widths.get(table_name)
+
+    def set_column_widths(self, table_name, widths):
+        """
+        Save column widths for a specific table.
+
+        Args:
+            table_name (str): Name of the table
+            widths (dict): Dictionary mapping column names to widths
+        """
+        self.column_widths[table_name] = widths

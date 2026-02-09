@@ -17,6 +17,7 @@ class TableView:
         self.sort_state = {"column": None, "reverse": False}
         self.page_size = 50
         self.offset, self.total_rows, self.loading_data = 0, 0, False
+        self.last_saved_widths = {}
         
         self._setup_ui()
         self._create_menu()
@@ -32,6 +33,7 @@ class TableView:
         self.tree.bind("<Double-1>", self.on_double_click); self.tree.bind("<Button-3>", self.show_context_menu)
         self.tree.bind("<ButtonRelease-1>", self.on_single_click)
         self.tree.bind("<Button-1>", self.on_tree_click)
+        self.tree.bind("<ButtonRelease-1>", self.on_column_resize, add='+')
 
     def _create_menu(self):
         self.row_menu = tk.Menu(self.parent, tearoff=0)
@@ -75,10 +77,23 @@ class TableView:
         self.offset += len(row_data)
 
         self.tree["columns"] = columns
+
+        # Get saved column widths for this table
+        saved_widths = self.state.get_column_widths(self.current_table) if self.current_table else None
+
+        # Track current widths for resize detection
+        current_widths = {}
         for col in columns:
             prefix = ("▼ " if self.sort_state["reverse"] else "▲ ") if col == self.sort_state["column"] else ""
             self.tree.heading(col, text=prefix + col, command=lambda _c=col: self.sort_column(_c, not self.sort_state["reverse"] if _c == self.sort_state["column"] else False))
-            self.tree.column(col, width=140, stretch=False)
+            # Use saved width if available, otherwise default to 140
+            width = saved_widths.get(col, 140) if saved_widths else 140
+            self.tree.column(col, width=width, stretch=False)
+            current_widths[col] = width
+
+        # Initialize last_saved_widths to current state
+        self.last_saved_widths = current_widths.copy()
+
         self.tree.delete(*self.tree.get_children())
         for index, row in enumerate(row_data): self.tree.insert("", "end", values=row, tags=('evenrow' if index%2==0 else 'oddrow'))
         self.tree.grid()
@@ -109,6 +124,21 @@ class TableView:
 
     def on_tree_click(self, event):
         if self.active_editor: self.commit_editor()
+
+    def on_column_resize(self, event):
+        """Save column widths when user resizes a column."""
+        if not self.current_table or not self.tree["columns"]:
+            return
+
+        # Get current widths of all columns
+        widths = {}
+        for col in self.tree["columns"]:
+            widths[col] = self.tree.column(col, "width")
+
+        # Only save if widths have actually changed (avoids unnecessary saves)
+        if widths != self.last_saved_widths:
+            self.state.set_column_widths(self.current_table, widths)
+            self.last_saved_widths = widths.copy()
 
     def cancel_edit(self, event=None):
         if self.active_editor: self.active_editor.destroy(); self.active_editor = None; self.editing_data = {}
