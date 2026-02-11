@@ -1,5 +1,17 @@
+"""
+Manages SQLite database operations for PCM CDB files.
+
+Provides methods for querying, updating, and managing database tables
+with support for foreign key lookups and schema caching.
+"""
+
 import sqlite3
+
 from core.constants import DB_CHUNK_SIZE
+
+# Preferred display columns when resolving foreign keys (tried in order)
+_FK_DISPLAY_COLUMNS = ["gene_sz_name", "name", "szName", "sz_name"]
+
 
 class DatabaseManager:
     """
@@ -24,6 +36,10 @@ class DatabaseManager:
         self.schema_cache = {}
         self.table_map_cache = None
 
+    # ------------------------------------------------------------------
+    # Table / column metadata
+    # ------------------------------------------------------------------
+
     def get_table_list(self):
         """
         Retrieve list of all user tables in the database.
@@ -36,7 +52,11 @@ class DatabaseManager:
         """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+            cursor.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+                "ORDER BY name"
+            )
             return [row[0] for row in cursor.fetchall()]
 
     def get_columns(self, table_name):
@@ -63,76 +83,133 @@ class DatabaseManager:
             self.schema_cache[table_name] = columns
             return columns
 
-    def fetch_data(self, table_name, search_term=None, lookup=False, limit=None, offset=0, sort_col=None, sort_reverse=False):
+    # ------------------------------------------------------------------
+    # Foreign key resolution helpers
+    # ------------------------------------------------------------------
+
+    def _ensure_table_map(self, cursor):
+        """Populate table_map_cache if not already loaded."""
+        if not self.table_map_cache:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            self.table_map_cache = {r[0].upper(): r[0] for r in cursor.fetchall()}
+
+    def _resolve_fk_target(self, suffix):
+        """Resolve a foreign key suffix to its target table name.
+
+        Searches for tables matching DYN_Suffix, STA_Suffix, GAM_Suffix,
+        or the raw Suffix.
+
+        Args:
+            suffix (str): The part of the FK column name after 'fkID'
+
+        Returns:
+            str or None: The actual table name if found
+        """
+        for candidate in [f"DYN_{suffix}", f"STA_{suffix}", f"GAM_{suffix}", suffix]:
+            if candidate.upper() in self.table_map_cache:
+                return self.table_map_cache[candidate.upper()]
+        return None
+
+    def _resolve_fk_display(self, cursor, target_table):
+        """Get primary key and display column for a FK target table.
+
+        Args:
+            cursor: SQLite cursor
+            target_table (str): Name of the target table
+
+        Returns:
+            tuple: (primary_key_col, display_col) or (None, None)
+        """
+        cursor.execute(f"PRAGMA table_info([{target_table}])")
+        target_info = cursor.fetchall()
+        target_cols = [c[1] for c in target_info]
+
+        target_pk = next(
+            (c[1] for c in target_info if c[5] > 0),
+            target_cols[0] if target_cols else "ID",
+        )
+        target_col = next(
+            (c for c in _FK_DISPLAY_COLUMNS if c in target_cols),
+            None,
+        )
+        if not target_col and len(target_cols) > 1:
+            target_col = target_cols[1]
+
+        return (target_pk, target_col) if target_col else (None, None)
+
+    # ------------------------------------------------------------------
+    # Search helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_search_clause(columns, search_term):
+        """Build a WHERE clause for searching across all columns.
+
+        Args:
+            columns (list[str]): Column names to search
+            search_term (str): Term to search for
+
+        Returns:
+            tuple: (where_sql, params)
+        """
+        where_sql = " OR ".join(f"CAST([{col}] AS TEXT) LIKE ?" for col in columns)
+        params = [f"%{search_term}%"] * len(columns)
+        return where_sql, params
+
+    # ------------------------------------------------------------------
+    # Data fetching
+    # ------------------------------------------------------------------
+
+    def fetch_data(self, table_name, search_term=None, lookup=False,
+                   limit=None, offset=0, sort_col=None, sort_reverse=False):
         """
         Fetch data from a table with optional filtering, lookup, sorting, and pagination.
 
         Args:
             table_name (str): Name of the table to query
-            search_term (str, optional): Search term to filter across all columns. Defaults to None.
-            lookup (bool, optional): If True, resolve foreign keys to display names. Defaults to False.
-            limit (int, optional): Maximum number of rows to return. Defaults to None (all rows).
-            offset (int, optional): Number of rows to skip (for pagination). Defaults to 0.
-            sort_col (str, optional): Column name to sort by. Defaults to None.
-            sort_reverse (bool, optional): If True, sort descending. Defaults to False.
+            search_term (str, optional): Search term to filter across all columns.
+            lookup (bool, optional): If True, resolve foreign keys to display names.
+            limit (int, optional): Maximum number of rows to return.
+            offset (int, optional): Number of rows to skip (for pagination).
+            sort_col (str, optional): Column name to sort by.
+            sort_reverse (bool, optional): If True, sort descending.
 
         Returns:
             tuple: (columns, rows) where columns is list[str] and rows is list[tuple]
-
-        Notes:
-            - When lookup=True, foreign key columns (fkID*) are replaced with
-              subqueries that retrieve human-readable names from related tables.
-            - Foreign key resolution follows naming conventions: fkIDSuffix looks for
-              tables named DYN_Suffix, STA_Suffix, GAM_Suffix, or Suffix.
-            - Target display columns are searched in order: gene_sz_name, name, szName, sz_name
-            - Search term is case-insensitive and matches across all columns.
-            - Schema and table mapping are cached for performance.
         """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            
-            if table_name in self.schema_cache: columns = self.schema_cache[table_name]
-            else:
-                cursor.execute(f"PRAGMA table_info([{table_name}])")
-                columns = [col[1] for col in cursor.fetchall()]
-                self.schema_cache[table_name] = columns
-            
+
+            columns = self.get_columns(table_name)
             select_fields = [f"[{c}]" for c in columns]
+
             if lookup:
-                if not self.table_map_cache:
-                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                    self.table_map_cache = {r[0].upper(): r[0] for r in cursor.fetchall()}
+                self._ensure_table_map(cursor)
                 for i, col in enumerate(columns):
                     if col.startswith("fkID") and len(col) > 4:
-                        suffix = col[4:]
-                        target_table = None
-                        for candidate in [f"DYN_{suffix}", f"STA_{suffix}", f"GAM_{suffix}", suffix]:
-                            if candidate.upper() in self.table_map_cache:
-                                target_table = self.table_map_cache[candidate.upper()]; break
+                        target_table = self._resolve_fk_target(col[4:])
                         if target_table:
                             try:
-                                cursor.execute(f"PRAGMA table_info([{target_table}])")
-                                target_info = cursor.fetchall()
-                                target_cols = [c[1] for c in target_info]
-                                target_pk = next((c[1] for c in target_info if c[5] > 0), target_cols[0] if target_cols else "ID")
-                                target_col = next((c for c in ["gene_sz_name", "name", "szName", "sz_name"] if c in target_cols), None)
-                                if not target_col and len(target_cols) > 1: target_col = target_cols[1]
-                                if target_col:
-                                    select_fields[i] = f"(SELECT [{target_col}] FROM [{target_table}] WHERE [{target_table}].[{target_pk}] = [{table_name}].[{col}])"
-                            except: pass
+                                pk, display = self._resolve_fk_display(cursor, target_table)
+                                if display:
+                                    select_fields[i] = (
+                                        f"(SELECT [{display}] FROM [{target_table}] "
+                                        f"WHERE [{target_table}].[{pk}] = [{table_name}].[{col}])"
+                                    )
+                            except Exception:
+                                pass
 
             query_cols = ", ".join(select_fields)
             sql = f"SELECT {query_cols} FROM [{table_name}]"
             params = []
 
             if search_term:
-                where_clause = " OR ".join([f"CAST([{col}] AS TEXT) LIKE ?" for col in columns])
-                sql += f" WHERE {where_clause}"
-                params = [f"%{search_term}%"] * len(columns)
-            
+                where_sql, params = self._build_search_clause(columns, search_term)
+                sql += f" WHERE {where_sql}"
+
             if sort_col:
                 sql += f" ORDER BY [{sort_col}] {'DESC' if sort_reverse else 'ASC'}"
-            
+
             if limit is not None:
                 sql += f" LIMIT {limit} OFFSET {offset}"
 
@@ -145,7 +222,7 @@ class DatabaseManager:
 
         Args:
             table_name (str): Name of the table
-            search_term (str, optional): Search term to filter across all columns. Defaults to None.
+            search_term (str, optional): Search term to filter across all columns.
 
         Returns:
             int: Number of rows matching the criteria
@@ -153,13 +230,19 @@ class DatabaseManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             if search_term:
-                cursor.execute(f"PRAGMA table_info([{table_name}])")
-                columns = [col[1] for col in cursor.fetchall()]
-                where_clause = " OR ".join([f"CAST([{col}] AS TEXT) LIKE ?" for col in columns])
-                cursor.execute(f"SELECT COUNT(*) FROM [{table_name}] WHERE {where_clause}", [f"%{search_term}%"] * len(columns))
+                columns = self.get_columns(table_name)
+                where_sql, params = self._build_search_clause(columns, search_term)
+                cursor.execute(
+                    f"SELECT COUNT(*) FROM [{table_name}] WHERE {where_sql}",
+                    params,
+                )
             else:
                 cursor.execute(f"SELECT COUNT(*) FROM [{table_name}]")
             return cursor.fetchone()[0]
+
+    # ------------------------------------------------------------------
+    # Single-row operations
+    # ------------------------------------------------------------------
 
     def get_max_id(self, table, id_column):
         """
@@ -205,12 +288,12 @@ class DatabaseManager:
             value: New value to set
             pk_col (str): Primary key column name
             pk_val: Primary key value identifying the row
-
-        Side Effects:
-            Commits the change to the database immediately.
         """
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute(f"UPDATE [{table}] SET [{column}]=? WHERE [{pk_col}]=?", (value, pk_val))
+            conn.execute(
+                f"UPDATE [{table}] SET [{column}]=? WHERE [{pk_col}]=?",
+                (value, pk_val),
+            )
             conn.commit()
 
     def delete_row(self, table, pk_col, pk_val):
@@ -221,9 +304,6 @@ class DatabaseManager:
             table (str): Table name
             pk_col (str): Primary key column name
             pk_val: Primary key value identifying the row to delete
-
-        Side Effects:
-            Commits the deletion to the database immediately.
         """
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(f"DELETE FROM [{table}] WHERE [{pk_col}]=?", (pk_val,))
@@ -239,11 +319,13 @@ class DatabaseManager:
             pk_vals (list): List of primary key values to delete
         """
         with sqlite3.connect(self.db_path) as conn:
-            chunk_size = DB_CHUNK_SIZE  # SQLite limit safety
-            for i in range(0, len(pk_vals), chunk_size):
-                chunk = pk_vals[i:i + chunk_size]
+            for i in range(0, len(pk_vals), DB_CHUNK_SIZE):
+                chunk = pk_vals[i:i + DB_CHUNK_SIZE]
                 placeholders = ", ".join(["?"] * len(chunk))
-                conn.execute(f"DELETE FROM [{table}] WHERE [{pk_col}] IN ({placeholders})", chunk)
+                conn.execute(
+                    f"DELETE FROM [{table}] WHERE [{pk_col}] IN ({placeholders})",
+                    chunk,
+                )
             conn.commit()
 
     def insert_row(self, table, columns, values):
@@ -254,65 +336,54 @@ class DatabaseManager:
             table (str): Table name
             columns (list[str]): List of column names
             values (list): List of values corresponding to columns
-
-        Side Effects:
-            Commits the new row to the database immediately.
-
-        Notes:
-            The number and order of values must match the columns list.
         """
         with sqlite3.connect(self.db_path) as conn:
             placeholders = ", ".join(["?"] * len(values))
-            col_names = ", ".join([f"[{c}]" for c in columns])
-            conn.execute(f"INSERT INTO [{table}] ({col_names}) VALUES ({placeholders})", values)
+            col_names = ", ".join(f"[{c}]" for c in columns)
+            conn.execute(
+                f"INSERT INTO [{table}] ({col_names}) VALUES ({placeholders})",
+                values,
+            )
             conn.commit()
+
+    # ------------------------------------------------------------------
+    # Foreign key dropdown options
+    # ------------------------------------------------------------------
 
     def get_fk_options(self, fk_column):
         """
         Get dropdown options for a foreign key column.
 
-        Resolves the target table and retrieves {display_name: id} mappings
-        for use in dropdown menus during editing.
-
         Args:
             fk_column (str): Foreign key column name (must start with 'fkID')
 
         Returns:
-            dict or None: Dictionary mapping display names to IDs, or None if not a FK column
-
-        Notes:
-            - Follows same resolution logic as fetch_data lookup mode
-            - Column naming: fkIDSuffix → searches for DYN_Suffix, STA_Suffix, GAM_Suffix, Suffix
-            - Display column preference: gene_sz_name, name, szName, sz_name
-            - Returns None if column is not a foreign key or target table not found
-            - Results are cached in table_map_cache for performance
+            dict or None: Dictionary mapping display names to IDs
         """
-        if not fk_column.startswith("fkID") or len(fk_column) <= 4: return None
-        suffix = fk_column[4:]
-        
+        if not fk_column.startswith("fkID") or len(fk_column) <= 4:
+            return None
+
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            if not self.table_map_cache:
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                self.table_map_cache = {r[0].upper(): r[0] for r in cursor.fetchall()}
-            
-            target_table = None
-            for candidate in [f"DYN_{suffix}", f"STA_{suffix}", f"GAM_{suffix}", suffix]:
-                if candidate.upper() in self.table_map_cache:
-                    target_table = self.table_map_cache[candidate.upper()]; break
-            
-            if not target_table: return None
+            self._ensure_table_map(cursor)
+
+            target_table = self._resolve_fk_target(fk_column[4:])
+            if not target_table:
+                return None
 
             try:
-                cursor.execute(f"PRAGMA table_info([{target_table}])")
-                target_info = cursor.fetchall()
-                target_cols = [c[1] for c in target_info]
-                target_pk = next((c[1] for c in target_info if c[5] > 0), target_cols[0] if target_cols else "ID")
-                target_col = next((c for c in ["gene_sz_name", "name", "szName", "sz_name"] if c in target_cols), None)
-                if not target_col and len(target_cols) > 1: target_col = target_cols[1]
-                
-                if target_col:
-                    cursor.execute(f"SELECT [{target_col}], [{target_pk}] FROM [{target_table}] ORDER BY [{target_col}]")
-                    return {str(row[0]): row[1] for row in cursor.fetchall() if row[0] is not None}
-            except: pass
+                pk, display = self._resolve_fk_display(cursor, target_table)
+                if display:
+                    cursor.execute(
+                        f"SELECT [{display}], [{pk}] FROM [{target_table}] "
+                        f"ORDER BY [{display}]"
+                    )
+                    return {
+                        str(row[0]): row[1]
+                        for row in cursor.fetchall()
+                        if row[0] is not None
+                    }
+            except Exception:
+                pass
+
         return None

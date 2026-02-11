@@ -1,8 +1,10 @@
-# PCM CDB Editor
+# PCM Database Tools
 
-A desktop GUI application for editing Pro Cycling Manager (PCM) game database files. This tool allows you to view and modify CDB files used by the PCM game series by converting them to SQLite format for editing.
+A desktop application bundling modding tools for Pro Cycling Manager (PCM), including a database editor and startlist generator.
 
 ## Features
+
+### Database Editor
 
 - **CDB File Support**: Open and edit .cdb files from Pro Cycling Manager games
 - **Table Browser**: Browse all database tables with a searchable sidebar
@@ -19,33 +21,33 @@ A desktop GUI application for editing Pro Cycling Manager (PCM) game database fi
   - Import CSV data back into tables
   - Export/Import all tables at once
 - **Column Management**: Show/hide columns with saveable presets
-- **Row Operations**: Duplicate or delete rows via right-click context menu
-- **Session Persistence**: Remembers your window size, favorites, recent files, and settings
+- **Row Operations**: Multi-select, duplicate, or delete rows via right-click context menu
+- **Session Persistence**: Remembers window size, favorites, recent files, and settings
 - **Pagination**: Efficiently handles large tables with lazy loading
+
+### Startlist Generator
+
+- **HTML Parsing**: Convert saved startlist pages from FirstCycling or ProCyclingStats into PCM-compatible XML
+- **Database Matching**: Match rider/team names to PCM database IDs using CSV databases or an opened CDB file
+- **Progress Tracking**: Real-time log output and progress bar during conversion
 
 ## Requirements
 
 - **Python**: 3.10 or higher
 - **Operating System**: Windows (required for SQLiteExporter.exe)
-- **Python Modules**: Standard library only (tkinter, sqlite3, csv, json, os, subprocess, shutil, tempfile, threading)
-
-### Linux/Mac Note
-The SQLiteExporter.exe tool is Windows-only. This application is designed for Windows users.
+- **Dependencies**: Install with pip (see below)
 
 ## Installation
 
 1. **Clone or Download** this repository
-2. **Ensure Python 3.10+** is installed:
+2. **Install dependencies**:
    ```bash
-   python --version
+   pip install -r requirements.txt
    ```
 3. **Verify tkinter** is available (usually included with Python on Windows):
    ```bash
    python -m tkinter
    ```
-   A small window should appear if tkinter is properly installed.
-
-4. **No additional packages needed!** This project uses only Python's standard library.
 
 ## Usage
 
@@ -55,14 +57,24 @@ The SQLiteExporter.exe tool is Windows-only. This application is designed for Wi
 python main.py
 ```
 
-### Workflow
+The home screen presents two tools: **Database Editor** and **Startlist Generator**, plus a list of recently opened CDB files.
 
-1. **Open a CDB File**: Click "Open CDB" or select from recent files
+### Database Editor Workflow
+
+1. **Open a CDB File**: Click the Database Editor tile or select a recent file
 2. **Browse Tables**: Use the sidebar to navigate tables (search or filter)
 3. **Add Favorites**: Right-click tables to favorite them for quick access
 4. **Edit Data**: Double-click cells to edit values
 5. **Enable Lookup Mode**: Toggle to see human-readable names for foreign keys (e.g., team names instead of IDs)
 6. **Save Changes**: Click "Save As..." to export your modified database back to .cdb format
+
+### Startlist Generator Workflow
+
+1. Click the **Startlist Generator** tile from the home screen
+2. **Select a database**: Choose a CSV database folder or open a CDB file for rider/team ID matching
+3. **Browse** for an HTML startlist file saved from FirstCycling or ProCyclingStats
+4. **Set output path** for the XML file
+5. Click **Convert** to generate the PCM-compatible startlist XML
 
 ### Keyboard Shortcuts
 
@@ -78,34 +90,40 @@ python main.py
 - **.cdb**: Pro Cycling Manager database file (proprietary format)
 - **.sqlite**: SQLite database (used internally for editing)
 - **.csv**: Comma-separated values (for data import/export)
+- **.xml**: PCM startlist format (output of Startlist Generator)
 
 The application automatically handles conversion between CDB and SQLite formats using the bundled SQLiteExporter.exe tool.
 
 ## Project Structure
 
 ```
-PCM-CDB-Editor/
-├── main.py                 # Application entry point
-├── core/                   # Business logic
-│   ├── db_manager.py       # Database operations and queries
-│   ├── app_state.py        # Application state and settings management
-│   ├── converter.py        # CDB ↔ SQLite conversion
-│   └── csv_io.py           # CSV import/export functionality
-├── ui/                     # User interface components
-│   ├── editor_gui.py       # Main application window
-│   ├── sidebar.py          # Table list and favorites sidebar
-│   ├── table_view.py       # Table data display and editing
-│   ├── welcome_screen.py   # Welcome screen with recent files
-│   └── ui_utils.py         # UI utilities (async operations)
-├── SQLiteExporter/         # External conversion tool
-│   └── SQLiteExporter.exe  # CDB ↔ SQLite converter (Windows)
-├── tests/                  # Unit tests
-│   ├── test_app_state.py   # AppState tests
-│   ├── test_db_manager.py  # DatabaseManager tests
+PCM-Database-Tools/
+├── main.py                          # Application entry point
+├── core/                            # Business logic
+│   ├── db_manager.py                # Database operations and queries
+│   ├── app_state.py                 # Application state and settings
+│   ├── constants.py                 # Shared constants
+│   ├── converter.py                 # CDB ↔ SQLite conversion
+│   ├── csv_io.py                    # CSV import/export
+│   └── startlist.py                 # Startlist parsing, matching, and XML writing
+├── ui/                              # User interface components
+│   ├── editor_gui.py                # Main application window and menu
+│   ├── welcome_screen.py            # Home screen with tool tiles
+│   ├── sidebar.py                   # Table list and favorites sidebar
+│   ├── table_view.py                # Table data display and editing
+│   ├── column_manager_dialog.py     # Column visibility and presets dialog
+│   ├── startlist_view.py            # Startlist generator view
+│   └── ui_utils.py                  # Tooltips and async task helpers
+├── databases/                       # CSV database folders for startlist matching
+├── SQLiteExporter/                  # External conversion tool
+│   └── SQLiteExporter.exe           # CDB ↔ SQLite converter (Windows)
+├── tests/                           # Unit tests
+│   ├── test_app_state.py            # AppState tests
+│   ├── test_db_manager.py           # DatabaseManager tests
 │   └── ...
-├── session_config.json     # User preferences (auto-generated)
-├── requirements.txt        # Dependencies documentation
-└── README.md               # This file
+├── requirements.txt                 # Python dependencies
+├── session_config.json              # User preferences (auto-generated)
+└── README.md
 ```
 
 ## Configuration
@@ -117,46 +135,41 @@ The application automatically creates `session_config.json` to store:
 - Last opened directory
 - Lookup mode preference
 
-This file is gitignored and will be created on first run. See `session_config.example.json` for the structure.
+This file is gitignored and will be created on first run.
 
 ## Testing
-
-Run the test suite using Python's built-in unittest framework:
 
 ```bash
 # Run all tests
 python -m unittest discover tests
 
-# Run specific test module
+# Run a specific test module
 python -m unittest tests.test_app_state
 ```
 
 ## Contributing
 
-Contributions are welcome! Please follow these guidelines:
-
-1. Maintain the "standard library only" philosophy (no external pip packages)
-2. Follow existing code style and patterns
-3. Test changes on actual PCM CDB files
-4. Add tests for new functionality
-5. Update documentation for new features
+1. Follow existing code style and patterns
+2. Test changes on actual PCM CDB files
+3. Add tests for new functionality
+4. Update documentation for new features
 
 ## Known Limitations
 
 - **Windows Only**: Requires SQLiteExporter.exe which is Windows-specific
-- **CDB Format**: Supports PCM game CDB files only (not other database formats)
+- **CDB Format**: Supports PCM game CDB files only
 - **Large Files**: Very large databases may take time to convert and load
 
 ## Troubleshooting
 
-**Issue: "Module tkinter not found"**
-- Solution: Tkinter is included with Python on Windows. Reinstall Python ensuring "tcl/tk and IDLE" is selected.
+**"Module tkinter not found"**
+Tkinter is included with Python on Windows. Reinstall Python ensuring "tcl/tk and IDLE" is selected.
 
-**Issue: "SQLiteExporter.exe not found"**
-- Solution: Ensure the `SQLiteExporter/` folder is in the same directory as `main.py`
+**"SQLiteExporter.exe not found"**
+Ensure the `SQLiteExporter/` folder is in the same directory as `main.py`.
 
-**Issue: CDB file won't open**
-- Solution: Ensure the file is a valid PCM CDB file and not corrupted
+**CDB file won't open**
+Ensure the file is a valid PCM CDB file and not corrupted.
 
 ## Credits
 
@@ -169,6 +182,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**⚠️ Important:** Always backup your .cdb files before editing! While this tool has undo/redo support, it's always safer to keep backups of your game files.
-
-**🎮 Happy modding!**
+**Always backup your .cdb files before editing!** While this tool has undo/redo support, it's always safer to keep backups of your game files.

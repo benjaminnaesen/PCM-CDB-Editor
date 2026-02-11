@@ -9,6 +9,7 @@ import os
 import json
 import tempfile
 from core.app_state import AppState
+from core.constants import MAX_UNDO_STACK_SIZE
 
 
 class TestAppState(unittest.TestCase):
@@ -80,6 +81,29 @@ class TestAppState(unittest.TestCase):
         # New edit should clear redo
         self.state.push_undo("table", "col", "old2", "new2", 1)
         self.assertEqual(len(self.state.redo_stack), 0)
+
+    def test_undo_stack_limit(self):
+        """Test that undo stack is trimmed to MAX_UNDO_STACK_SIZE."""
+        # Push more actions than the limit
+        for i in range(MAX_UNDO_STACK_SIZE + 20):
+            self.state.push_undo("table", "col", f"old{i}", f"new{i}", i)
+
+        self.assertEqual(len(self.state.undo_stack), MAX_UNDO_STACK_SIZE)
+        # Most recent action should be preserved (last pushed)
+        latest = self.state.undo_stack[-1]
+        expected_idx = MAX_UNDO_STACK_SIZE + 19
+        self.assertEqual(latest["old"], f"old{expected_idx}")
+        self.assertEqual(latest["new"], f"new{expected_idx}")
+
+    def test_undo_stack_limit_with_push_action(self):
+        """Test that push_action also respects the undo stack limit."""
+        for i in range(MAX_UNDO_STACK_SIZE + 10):
+            action = {
+                "type": "delete", "table": "t", "rows": [i],
+            }
+            self.state.push_action(action)
+
+        self.assertEqual(len(self.state.undo_stack), MAX_UNDO_STACK_SIZE)
 
 
 if __name__ == '__main__':

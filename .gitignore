@@ -28,6 +28,9 @@ session_config.json
 .idea/
 *.sublime-*
 
+# Claude Code
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

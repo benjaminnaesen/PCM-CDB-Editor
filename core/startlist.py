@@ -185,11 +185,21 @@ class StartlistDatabase:
         last_norm_alt = _normalize(parts[-1])
         first_norm_alt = _normalize(' '.join(parts[:-1]))
 
-        candidates = self._cyclist_by_last.get(last_norm, [])
+        candidates = list(self._cyclist_by_last.get(last_norm, []))
         if not candidates:
-            candidates = self._cyclist_by_last.get(last_norm_alt, [])
+            candidates = list(self._cyclist_by_last.get(last_norm_alt, []))
             if candidates:
                 first_norm = first_norm_alt
+
+        # Also include partial last name matches (handles hyphenated /
+        # double-barrelled surnames like "Martin-Guyonnet" vs "Martin")
+        seen = {id(c) for c in candidates}
+        for db_last, cyclists in self._cyclist_by_last.items():
+            if db_last != last_norm and (last_norm in db_last or db_last in last_norm):
+                for c in cyclists:
+                    if id(c) not in seen:
+                        candidates.append(c)
+                        seen.add(id(c))
 
         if not candidates:
             return None, None
@@ -247,6 +257,11 @@ class StartlistParser:
             if result:
                 return result
 
+        if self._is_procyclingstats(soup):
+            result = self._parse_procyclingstats(soup)
+            if result:
+                return result
+
         for strategy in [
             self._parse_startlist_lists,
             self._parse_tables,
@@ -293,6 +308,78 @@ class StartlistParser:
                 startlist[team_name] = riders
 
         return startlist or None
+
+    # -- ProCyclingStats -----------------------------------------------------
+
+    @staticmethod
+    def _is_procyclingstats(soup):
+        """Check if HTML is from ProCyclingStats."""
+        return bool(soup.select_one('ul.startlist_v4'))
+
+    @staticmethod
+    def _parse_procyclingstats(soup):
+        """Parse a ProCyclingStats startlist page.
+
+        PCS structure::
+
+            ul.startlist_v4 > li            (one per team)
+                div.ridersCont
+                    a.team                  → team name
+                    ul > li                 → riders
+                        a[href*=/rider/]    → "LASTNAME Firstname"
+        """
+        startlist = {}
+
+        for team_li in soup.select('ul.startlist_v4 > li'):
+            team_link = team_li.select_one('a.team')
+            if not team_link:
+                continue
+            team_name = team_link.get_text(strip=True)
+            # Strip category suffix: (WT), (PRT), (CT), etc.
+            team_name = re.sub(r'\s*\([^)]*\)\s*$', '', team_name).strip()
+            if not team_name:
+                continue
+
+            riders = []
+            for rider_link in team_li.select('ul > li a[href*="/rider/"]'):
+                raw = rider_link.get_text(strip=True)
+                if not raw:
+                    continue
+                name = StartlistParser._pcs_name_to_first_last(raw)
+                riders.append(name)
+
+            if riders:
+                startlist[team_name] = riders
+
+        return startlist or None
+
+    @staticmethod
+    def _pcs_name_to_first_last(pcs_name):
+        """Convert PCS 'LASTNAME Firstname' to 'Firstname LASTNAME'.
+
+        PCS displays names with the surname in ALL CAPS followed by the
+        given name in normal case.  Detects the boundary by finding the
+        first word that is not fully uppercase.
+        """
+        parts = pcs_name.strip().split()
+        if len(parts) < 2:
+            return pcs_name
+
+        # Find the first non-uppercase word (= start of first name)
+        first_idx = len(parts)
+        for i, word in enumerate(parts):
+            has_alpha = any(c.isalpha() for c in word)
+            if has_alpha and not word.isupper():
+                first_idx = i
+                break
+
+        if first_idx == 0 or first_idx >= len(parts):
+            # Can't determine split; return as-is
+            return pcs_name
+
+        firstname = ' '.join(parts[first_idx:])
+        lastname = ' '.join(parts[:first_idx])
+        return f"{firstname} {lastname}"
 
     # -- Generic strategies --------------------------------------------------
 

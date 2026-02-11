@@ -1,5 +1,14 @@
-import json, os
-from core.constants import MAX_RECENT_FILES
+"""
+Manages application state including settings, favorites, and undo/redo history.
+
+Persists user preferences to JSON file and maintains undo/redo stacks for edits.
+"""
+
+import json
+import os
+
+from core.constants import MAX_RECENT_FILES, MAX_UNDO_STACK_SIZE
+
 
 class AppState:
     """
@@ -43,8 +52,16 @@ class AppState:
             try:
                 with open(self.settings_file, "r") as file:
                     return json.load(file)
-            except: pass
-        return {"favorites": [], "window_size": "1200x800", "last_path": "", "is_maximized": False, "lookup_mode": False, "recents": []}
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {
+            "favorites": [],
+            "window_size": "1200x800",
+            "last_path": "",
+            "is_maximized": False,
+            "lookup_mode": False,
+            "recents": [],
+        }
 
     def save_settings(self, window_geometry, is_maximized, lookup_mode):
         """
@@ -54,9 +71,6 @@ class AppState:
             window_geometry (str): Window size and position (e.g., "1200x800+100+50")
             is_maximized (bool): Whether window is maximized
             lookup_mode (bool): Whether lookup mode is enabled
-
-        Side Effects:
-            Writes to self.settings_file with current favorites, recents, and provided params
         """
         self.settings["favorites"] = self.favorites
         self.settings["recents"] = self.recents
@@ -75,18 +89,20 @@ class AppState:
 
         Args:
             path (str): File path to add
-
-        Side Effects:
-            - Removes duplicate if path already exists
-            - Inserts path at the beginning (most recent first)
-            - Truncates list to MAX_RECENT_FILES most recent files
-
-        Notes:
-            Most recently added files appear first in the list.
         """
-        if path in self.recents: self.recents.remove(path)
+        if path in self.recents:
+            self.recents.remove(path)
         self.recents.insert(0, path)
         self.recents = self.recents[:MAX_RECENT_FILES]
+
+    # ------------------------------------------------------------------
+    # Undo / Redo
+    # ------------------------------------------------------------------
+
+    def _trim_undo_stack(self):
+        """Trim undo stack to MAX_UNDO_STACK_SIZE, dropping oldest entries."""
+        if len(self.undo_stack) > MAX_UNDO_STACK_SIZE:
+            self.undo_stack = self.undo_stack[-MAX_UNDO_STACK_SIZE:]
 
     def push_undo(self, table, col, old, new, pk):
         """
@@ -98,32 +114,34 @@ class AppState:
             old: Previous value before edit
             new: New value after edit
             pk: Primary key value identifying the row
-
-        Side Effects:
-            Clears redo stack (new edits invalidate redo history)
         """
-        self.undo_stack.append({"table": table, "column": col, "old": old, "new": new, "pk": pk})
+        self.undo_stack.append({
+            "table": table, "column": col,
+            "old": old, "new": new, "pk": pk,
+        })
         self.redo_stack.clear()
+        self._trim_undo_stack()
 
     def push_action(self, action):
         """
         Push a generic action dictionary to the undo stack.
-        
+
         Args:
             action (dict): Dictionary containing action details (type, table, etc.)
         """
         self.undo_stack.append(action)
         self.redo_stack.clear()
+        self._trim_undo_stack()
 
     def undo(self):
         """
         Pop the most recent action from undo stack and add to redo stack.
 
         Returns:
-            dict or None: Action dictionary with keys (table, column, old, new, pk)
-                         or None if undo stack is empty
+            dict or None: Action dictionary, or None if undo stack is empty
         """
-        if not self.undo_stack: return None
+        if not self.undo_stack:
+            return None
         action = self.undo_stack.pop()
         self.redo_stack.append(action)
         return action
@@ -133,13 +151,17 @@ class AppState:
         Pop the most recent action from redo stack and add back to undo stack.
 
         Returns:
-            dict or None: Action dictionary with keys (table, column, old, new, pk)
-                         or None if redo stack is empty
+            dict or None: Action dictionary, or None if redo stack is empty
         """
-        if not self.redo_stack: return None
+        if not self.redo_stack:
+            return None
         action = self.redo_stack.pop()
         self.undo_stack.append(action)
         return action
+
+    # ------------------------------------------------------------------
+    # Column preferences
+    # ------------------------------------------------------------------
 
     def get_column_widths(self, table_name):
         """

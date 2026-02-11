@@ -1,11 +1,15 @@
 """
-CDB ↔ SQLite conversion utilities using SQLiteExporter.exe.
+CDB <-> SQLite conversion utilities using SQLiteExporter.exe.
 
 This module wraps the external SQLiteExporter tool to convert between
 Pro Cycling Manager's proprietary CDB format and SQLite databases.
 """
 
-import os, subprocess, shutil, tempfile, sys
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 
 if getattr(sys, 'frozen', False):
     # Running as compiled executable (PyInstaller)
@@ -18,6 +22,7 @@ else:
     BASE_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 TOOL_PATH = os.path.join(BASE_PATH, "SQLiteExporter", "SQLiteExporter.exe")
+
 
 def export_cdb_to_sqlite(cdb_path):
     """
@@ -49,9 +54,11 @@ def export_cdb_to_sqlite(cdb_path):
     temp_sqlite = os.path.join(tempfile.gettempdir(), "pcm_working_db.sqlite")
     local_sqlite = abs_cdb_path.replace(".cdb", ".sqlite")
     subprocess.run([TOOL_PATH, "-a", "-export", abs_cdb_path], check=True)
-    if os.path.exists(temp_sqlite): os.remove(temp_sqlite)
+    if os.path.exists(temp_sqlite):
+        os.remove(temp_sqlite)
     shutil.move(local_sqlite, temp_sqlite)
     return temp_sqlite
+
 
 def import_sqlite_to_cdb(temp_sqlite, target_cdb_path):
     """
@@ -77,4 +84,5 @@ def import_sqlite_to_cdb(temp_sqlite, target_cdb_path):
     target_sqlite = target_base + ".sqlite"
     shutil.copy2(temp_sqlite, target_sqlite)
     subprocess.run([TOOL_PATH, "-a", "-import", target_base], check=True)
-    if os.path.exists(target_sqlite): os.remove(target_sqlite)
+    if os.path.exists(target_sqlite):
+        os.remove(target_sqlite)
