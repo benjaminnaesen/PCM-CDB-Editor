@@ -1,5 +1,5 @@
 """
-Application-wide constants for PCM CDB Editor.
+Application-wide constants for PCM Database Tools.
 
 This module contains all magic numbers and configuration values
 used throughout the application, centralized for easy maintenance.

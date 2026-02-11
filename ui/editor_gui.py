@@ -1,8 +1,8 @@
 """
 Main application window and controller.
 
-Coordinates all UI components, manages file operations,
-and handles application lifecycle.
+Coordinates the home screen, database editor, and startlist generator,
+manages file operations, and handles application lifecycle.
 """
 
 import tkinter as tk
@@ -18,41 +18,33 @@ from ui.ui_utils import run_async
 from ui.sidebar import Sidebar
 from ui.table_view import TableView
 from ui.column_manager_dialog import ColumnManagerDialog
+from ui.startlist_view import StartlistView
 
-class CDBEditor:
-    """
-    Main application controller for PCM CDB Editor.
+
+class PCMDatabaseTools:
+    """Main application controller for PCM Database Tools.
 
     Manages:
-        - Welcome screen and editor frame switching
-        - CDB file loading/saving via SQLiteExporter
-        - Menu and toolbar actions
+        - Home screen with tool launcher tiles
+        - Database editor (CDB loading, table editing, CSV import/export)
+        - Startlist generator (full-frame view)
         - Undo/redo coordination
-        - Search with debouncing
-        - Lookup mode toggle
-        - CSV import/export operations
         - Application settings persistence
     """
 
     def __init__(self, root):
-        """
-        Initialize main application window.
-
-        Args:
-            root: Tkinter root window
-        """
         self.root = root
-        self.root.title("PCM CDB Editor")
+        self.root.title("PCM Database Tools")
         self.state = AppState("session_config.json")
         self.normal_geometry = self.state.settings.get("window_size", "1200x800")
         self.root.geometry(self.normal_geometry)
-        
+
         if self.state.settings.get("is_maximized", False):
             try:
                 if sys.platform.startswith('win'): self.root.state('zoomed')
                 else: self.root.attributes('-zoomed', True)
             except: pass
-        
+
         self.root.bind("<Configure>", self.track_window_size)
         self.db, self.temp_path, self.current_table = None, None, None
         self.unsaved_changes = False
@@ -69,17 +61,40 @@ class CDBEditor:
             if not is_maximized: self.normal_geometry = self.root.geometry()
         except: pass
 
-    def _setup_ui(self):
-        self.editor_frame = tk.Frame(self.root)
-        self.welcome_frame = tk.Frame(self.root, bg="#f0f0f0")
-        self.welcome_screen = WelcomeScreen(self.welcome_frame, self.state, self.load_cdb)
+    # ==================================================================
+    # UI Setup
+    # ==================================================================
 
+    def _setup_ui(self):
+        # -- Home screen frame --
+        self.welcome_frame = tk.Frame(self.root, bg="#f0f0f0")
+        self.welcome_screen = WelcomeScreen(
+            self.welcome_frame, self.state,
+            load_callback=self.load_cdb,
+            startlist_callback=self.show_startlist,
+        )
+
+        # -- Editor frame --
+        self.editor_frame = tk.Frame(self.root)
+        self._setup_editor_toolbar()
+        self._setup_editor_content()
+
+        # -- Startlist frame --
+        self.startlist_frame = tk.Frame(self.root)
+        self.startlist_view = StartlistView(
+            self.startlist_frame, self.root, go_home=self.show_home,
+        )
+
+        self.show_home()
+
+    def _setup_editor_toolbar(self):
         toolbar = tk.Frame(self.editor_frame, pady=10, bg="#f0f0f0")
         toolbar.pack(side=tk.TOP, fill=tk.X)
+
+        tk.Button(toolbar, text="Home", command=self.close_cdb, width=10).pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Open CDB", command=self.load_cdb, width=10).pack(side=tk.LEFT, padx=5)
-        tk.Button(toolbar, text="Close CDB", command=self.close_cdb, width=10).pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Save As...", command=self.save_as_cdb, width=10).pack(side=tk.LEFT, padx=5)
-        
+
         self.tools_btn = tk.Menubutton(toolbar, text="Tools", relief="raised", width=10)
         self.tools_menu = tk.Menu(self.tools_btn, tearoff=0)
 
@@ -106,6 +121,7 @@ class CDBEditor:
         tk.Button(toolbar, text="Add Row", command=lambda: self.table_view.add_row(), width=12).pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Remove Row", command=lambda: self.table_view.delete_row(), width=12).pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Clear Table", command=self.clear_table, width=12).pack(side=tk.LEFT, padx=5)
+
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", self.on_search)
         self._create_search_box(toolbar, self.search_var, 40).pack(side=tk.RIGHT, padx=15)
@@ -115,6 +131,7 @@ class CDBEditor:
         tk.Button(toolbar, text="Columns", command=self.open_column_manager, width=10).pack(side=tk.RIGHT, padx=5)
         self.tools_btn.pack(side=tk.RIGHT, padx=5)
 
+    def _setup_editor_content(self):
         self.pw = tk.PanedWindow(self.editor_frame, orient=tk.HORIZONTAL, sashwidth=4, bg="#ccc")
         self.pw.pack(expand=True, fill=tk.BOTH)
 
@@ -125,21 +142,35 @@ class CDBEditor:
         self.table_frame = tk.Frame(self.pw)
         self.pw.add(self.table_frame)
         self.table_view = TableView(self.table_frame, self.state, self.on_data_change)
-        
+
         self.status = tk.Label(self.editor_frame, text="Ready", bd=1, relief="sunken", anchor="w")
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
-        self.show_welcome_screen()
 
-    def show_welcome_screen(self):
+    # ==================================================================
+    # Navigation
+    # ==================================================================
+
+    def show_home(self):
+        """Show the home screen, hiding all other views."""
         self.editor_frame.pack_forget()
+        self.startlist_frame.pack_forget()
+        self.root.title("PCM Database Tools")
         self.welcome_screen.show()
 
+    def show_startlist(self):
+        """Show the startlist generator view."""
+        self.welcome_screen.hide()
+        self.editor_frame.pack_forget()
+        self.root.title("PCM Database Tools - Startlist Generator")
+        self.startlist_frame.pack(fill=tk.BOTH, expand=True)
+
+    # ==================================================================
+    # Search & Lookup
+    # ==================================================================
+
     def on_search(self, *args):
-        # Cancel previous search timer if user is still typing
         if self.search_timer:
             self.root.after_cancel(self.search_timer)
-
-        # Schedule new search after delay
         self.search_timer = self.root.after(SEARCH_DEBOUNCE_DELAY, self._execute_search)
 
     def _execute_search(self):
@@ -152,6 +183,10 @@ class CDBEditor:
         self.lookup_btn.config(text="Lookup: ON" if new_state else "Lookup: OFF")
         self.table_view.set_lookup_mode(new_state)
 
+    # ==================================================================
+    # Undo / Redo
+    # ==================================================================
+
     def on_data_change(self):
         self.unsaved_changes = True
         self._update_btns()
@@ -159,7 +194,7 @@ class CDBEditor:
     def undo(self):
         action = self.state.undo()
         if not action: return
-        
+
         if action.get("type") == "row_op":
             self._handle_row_op(action, is_undo=True)
         else:
@@ -170,7 +205,7 @@ class CDBEditor:
     def redo(self):
         action = self.state.redo()
         if not action: return
-        
+
         if action.get("type") == "row_op":
             self._handle_row_op(action, is_undo=False)
         else:
@@ -185,9 +220,6 @@ class CDBEditor:
         pk_col = action["pk_col"]
         columns = action["columns"]
 
-        # Determine effective operation
-        # Undo Insert -> Delete | Redo Insert -> Insert
-        # Undo Delete -> Insert | Redo Delete -> Delete
         effective_op = "delete" if (mode == "insert" and is_undo) or (mode == "delete" and not is_undo) else "insert"
 
         try:
@@ -207,6 +239,10 @@ class CDBEditor:
         self.undo_btn.config(state="normal" if self.state.undo_stack else "disabled")
         self.redo_btn.config(state="normal" if self.state.redo_stack else "disabled")
 
+    # ==================================================================
+    # CDB File Operations
+    # ==================================================================
+
     def close_cdb(self):
         if self.unsaved_changes:
             if not messagebox.askyesno("Unsaved Changes", "You have unsaved changes. Are you sure you want to close?"): return
@@ -214,18 +250,16 @@ class CDBEditor:
         self.table_view.set_db(None)
         self.tools_menu.entryconfig("Career", state="disabled")
         gc.collect()
-        self.editor_frame.pack_forget()
-        self.welcome_screen.show()
-        self.root.title("PCM CDB Editor")
+        self.show_home()
 
     def load_cdb(self, path=None):
         if not path: path = filedialog.askopenfilename(initialdir=self.state.settings.get("last_path",""), filetypes=[("CDB files", "*.cdb")])
         if not path: return
-        
-        def task(): 
+
+        def task():
             gc.collect()
             return converter.export_cdb_to_sqlite(path)
-        
+
         def on_success(temp_path):
             self.temp_path = temp_path
             self.db = DatabaseManager(self.temp_path); self.all_tables = self.db.get_table_list()
@@ -234,22 +268,15 @@ class CDBEditor:
             self.table_view.set_lookup_mode(self.lookup_var.get())
             self.sidebar.select_first_favorite()
             self.state.add_recent(path)
-            self._update_career_menu_state()
+            self._update_tools_menu_state()
             self.welcome_screen.hide()
+            self.startlist_frame.pack_forget()
+            self.root.title(f"PCM Database Tools - {os.path.basename(path)}")
             self.editor_frame.pack(fill=tk.BOTH, expand=True)
             self.status.config(text=f"Loaded: {path}")
             self.unsaved_changes = False
 
         run_async(self.root, task, on_success, "Opening CDB...")
-
-    def _create_search_box(self, parent, var, width):
-        frame = tk.Frame(parent, bg="white", highlightbackground="#ccc", highlightthickness=1)
-        tk.Entry(frame, textvariable=var, width=width, relief="flat").pack(side="left", padx=5, fill="x", expand=True)
-        tk.Button(frame, text="✕", command=lambda: var.set(""), relief="flat", bg="white", bd=0).pack(side="right")
-        return frame
-
-    def on_table_select(self, table_name):
-        self.table_view.set_table(table_name)
 
     def save_as_cdb(self):
         path = filedialog.asksaveasfilename(defaultextension=".cdb", filetypes=[("CDB files", "*.cdb")])
@@ -260,6 +287,67 @@ class CDBEditor:
                 self.unsaved_changes = False
                 self.status.config(text=f"Saved: {path}")
             run_async(self.root, task, on_complete, "Saving CDB...")
+
+    # ==================================================================
+    # Tools Menu
+    # ==================================================================
+
+    def _update_tools_menu_state(self):
+        """Enable or disable tool submenus based on available tables."""
+        if self.db and "GAM_career_data" in self.all_tables:
+            self.tools_menu.entryconfig("Career", state="normal")
+        else:
+            self.tools_menu.entryconfig("Career", state="disabled")
+
+    def change_team_budget(self):
+        """Open dialog to change team budget from GAM_career_data table."""
+        if not self.db:
+            return
+
+        try:
+            import sqlite3
+            with sqlite3.connect(self.db.db_path) as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("PRAGMA table_info([GAM_career_data])")
+                columns = [col[1] for col in cursor.fetchall()]
+
+                if "value" not in columns:
+                    messagebox.showerror("Error", "Column 'value' not found in GAM_career_data table")
+                    return
+
+                cursor.execute("SELECT value FROM [GAM_career_data] WHERE UID = 1")
+                row = cursor.fetchone()
+
+                if not row:
+                    messagebox.showerror("Error", "No career data found (UID = 1 not found in GAM_career_data)")
+                    return
+
+                current_value = row[0]
+
+            new_value = simpledialog.askinteger(
+                "Change Team Budget",
+                "Enter new team budget:",
+                initialvalue=current_value,
+                minvalue=0,
+                parent=self.root
+            )
+
+            if new_value is not None:
+                self.db.update_cell("GAM_career_data", "value", new_value, "UID", 1)
+                self.unsaved_changes = True
+
+                if self.table_view.current_table == "GAM_career_data":
+                    self.table_view.load_table_data()
+
+                self.status.config(text=f"Team budget updated to {new_value}")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to update budget: {str(e)}")
+
+    # ==================================================================
+    # CSV Import / Export
+    # ==================================================================
 
     def export_csv(self):
         if not self.db: return
@@ -313,74 +401,17 @@ class CDBEditor:
 
             run_async(self.root, lambda: csv_io.import_from_csv(self.temp_path, folder), on_complete, "Importing all tables...")
 
-    def _update_career_menu_state(self):
-        """Enable or disable Career menu based on GAM_career_data table existence."""
-        if self.db and "GAM_career_data" in self.all_tables:
-            self.tools_menu.entryconfig("Career", state="normal")
-        else:
-            self.tools_menu.entryconfig("Career", state="disabled")
-
-    def change_team_budget(self):
-        """Open dialog to change team budget from GAM_career_data table."""
-        if not self.db:
-            return
-
-        try:
-            # Fetch current budget value for UID = 1 using direct SQL
-            import sqlite3
-            with sqlite3.connect(self.db.db_path) as conn:
-                cursor = conn.cursor()
-
-                # Get table schema
-                cursor.execute("PRAGMA table_info([GAM_career_data])")
-                columns = [col[1] for col in cursor.fetchall()]
-
-                if "value" not in columns:
-                    messagebox.showerror("Error", "Column 'value' not found in GAM_career_data table")
-                    return
-
-                # Fetch the row with UID = 1
-                cursor.execute("SELECT value FROM [GAM_career_data] WHERE UID = 1")
-                row = cursor.fetchone()
-
-                if not row:
-                    messagebox.showerror("Error", "No career data found (UID = 1 not found in GAM_career_data)")
-                    return
-
-                current_value = row[0]
-
-            # Open input dialog
-            new_value = simpledialog.askinteger(
-                "Change Team Budget",
-                "Enter new team budget:",
-                initialvalue=current_value,
-                minvalue=0,
-                parent=self.root
-            )
-
-            if new_value is not None:  # User clicked OK (not Cancel)
-                # Update the database
-                self.db.update_cell("GAM_career_data", "value", new_value, "UID", 1)
-                self.unsaved_changes = True
-
-                # Refresh table if it's currently displayed
-                if self.table_view.current_table == "GAM_career_data":
-                    self.table_view.load_table_data()
-
-                self.status.config(text=f"Team budget updated to {new_value}")
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to update budget: {str(e)}")
+    # ==================================================================
+    # Column Manager & Table Operations
+    # ==================================================================
 
     def open_column_manager(self):
-        """Open the column manager dialog."""
         if not self.db or not self.table_view.current_table:
             messagebox.showwarning("No Table", "Please select a table first.")
             return
         ColumnManagerDialog(self.root, self.table_view, self.state)
 
     def clear_table(self):
-        """Clear all rows from the current table."""
         if not self.db or not self.table_view.current_table:
             messagebox.showwarning("No Table", "Please select a table first.")
             return
@@ -397,14 +428,11 @@ class CDBEditor:
                                       f"This will delete ALL {total_rows} rows from '{table_name}'.\n\nThis action can be undone.\n\nContinue?"):
                 return
 
-            # Get all columns and primary key
             columns = self.db.get_columns(table_name)
             pk_col = columns[0]
 
-            # Fetch ALL rows for undo (no limit)
             _, all_rows = self.db.fetch_data(table_name, limit=None)
 
-            # Capture data for undo
             deleted_rows = []
             for row in all_rows:
                 pk = row[0]
@@ -412,11 +440,9 @@ class CDBEditor:
                 if data:
                     deleted_rows.append({"pk": pk, "data": data})
 
-            # Delete all rows
             pk_vals = [row[0] for row in all_rows]
             self.db.delete_rows(table_name, pk_col, pk_vals)
 
-            # Push undo action
             if deleted_rows:
                 action = {
                     "type": "row_op",
@@ -435,6 +461,19 @@ class CDBEditor:
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to clear table: {str(e)}")
+
+    # ==================================================================
+    # Helpers
+    # ==================================================================
+
+    def _create_search_box(self, parent, var, width):
+        frame = tk.Frame(parent, bg="white", highlightbackground="#ccc", highlightthickness=1)
+        tk.Entry(frame, textvariable=var, width=width, relief="flat").pack(side="left", padx=5, fill="x", expand=True)
+        tk.Button(frame, text="✕", command=lambda: var.set(""), relief="flat", bg="white", bd=0).pack(side="right")
+        return frame
+
+    def on_table_select(self, table_name):
+        self.table_view.set_table(table_name)
 
     def on_close(self):
         if self.unsaved_changes:

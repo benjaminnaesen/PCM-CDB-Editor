@@ -1,5 +1,4 @@
-# PCM CDB Editor - Requirements
-# This project uses only Python standard library modules
+# PCM Database Tools - Requirements
 
 # Python Version Requirement
 python>=3.10
@@ -17,3 +16,4 @@ python>=3.10
 
 # External Dependencies:
 # - SQLiteExporter.exe (Windows executable, included in SQLiteExporter/)
+beautifulsoup4

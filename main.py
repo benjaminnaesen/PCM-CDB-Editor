@@ -1,15 +1,16 @@
 """
-PCM CDB Editor - Main entry point.
+PCM Database Tools - Main entry point.
 
-A desktop application for editing Pro Cycling Manager game database files.
+A desktop application bundling modding tools for Pro Cycling Manager,
+including a database editor and startlist generator.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 import tkinter as tk
-from ui.editor_gui import CDBEditor
+from ui.editor_gui import PCMDatabaseTools
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = CDBEditor(root)
+    app = PCMDatabaseTools(root)
     root.mainloop()
