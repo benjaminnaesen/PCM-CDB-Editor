@@ -62,7 +62,8 @@ class StartlistView:
         toolbar.pack(side=tk.TOP, fill=tk.X)
 
         tk.Button(
-            toolbar, text="Home", command=self._on_home, width=10,
+            toolbar, text="\u2190 Back", command=self._on_home,
+            bg="#b0b0b0",
         ).pack(side=tk.LEFT, padx=5)
 
         # Shared content area
@@ -163,8 +164,8 @@ class StartlistView:
         btn_frame = tk.Frame(tab)
         btn_frame.pack(fill='x', pady=(0, 8))
         tk.Button(
-            btn_frame, text="Convert", command=self._convert,
-            bg="#4a90d9", fg="white", width=14,
+            btn_frame, text="Generate Startlist", command=self._convert,
+            bg="#2e8b57", fg="white",
         ).pack(side='left')
 
         # Progress bar
@@ -194,7 +195,7 @@ class StartlistView:
         self.mp_cdb_var = tk.StringVar()
         tk.Entry(cdb_row, textvariable=self.mp_cdb_var, width=60,
                  state='readonly').pack(side='left', fill='x', expand=True)
-        tk.Button(cdb_row, text="Open CDB...",
+        tk.Button(cdb_row, text="Load CDB...",
                   command=self._mp_browse_cdb).pack(side='left', padx=(6, 0))
 
         self.mp_cdb_status = tk.Label(
@@ -232,8 +233,8 @@ class StartlistView:
         btn_frame = tk.Frame(tab)
         btn_frame.pack(fill='x', pady=(0, 8))
         tk.Button(
-            btn_frame, text="Process", command=self._mp_process,
-            bg="#2e8b57", fg="white", width=14,
+            btn_frame, text="Generate CDB Startlist", command=self._mp_process,
+            bg="#2e8b57", fg="white",
         ).pack(side='left')
 
         # Progress bar
@@ -622,9 +623,35 @@ class StartlistView:
     # ======================================================================
 
     def _on_home(self):
+        # Reset singleplayer fields
         self.temp_path = None
         self.db = None
+        self.file_var.set('')
+        self.out_var.set('')
+        self._race_map = {}
+        self.race_combo['values'] = []
+        self.race_combo.set('')
+        self.db_status.config(text='', fg='#888')
+        self.progress_var.set(0)
+        self._clear_log()
+        if self._db_names:
+            self.db_combo.current(0)
+        else:
+            self.db_combo.set('')
+
+        # Reset multiplayer fields
         self.mp_temp_path = None
         self.mp_db = None
+        self.mp_cdb_var.set('')
+        self.mp_html_var.set('')
+        self.mp_out_var.set('')
+        self.mp_cdb_status.config(text='No CDB loaded', fg='#888')
+        self.mp_progress_var.set(0)
+        self._mp_clear_log()
+
+        # Reset to first tab
+        self.notebook.select(0)
+
+        self.status.config(text='Ready')
         gc.collect()
         self.go_home()

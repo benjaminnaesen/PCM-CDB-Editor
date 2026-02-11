@@ -104,7 +104,7 @@ class PCMDatabaseTools:
         toolbar = tk.Frame(self.editor_frame, pady=10, bg="#f0f0f0")
         toolbar.pack(side=tk.TOP, fill=tk.X)
 
-        tk.Button(toolbar, text="Home", command=self.close_cdb, width=10).pack(side=tk.LEFT, padx=5)
+        tk.Button(toolbar, text="\u2190 Close CDB", command=self.close_cdb, bg="#b0b0b0").pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Open CDB", command=self.load_cdb, width=10).pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Save As...", command=self.save_as_cdb, width=10).pack(side=tk.LEFT, padx=5)
 
