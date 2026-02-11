@@ -71,9 +71,10 @@ class StartlistDatabase:
     All matching is accent-insensitive and tolerant of minor name differences.
     """
 
-    def __init__(self, teams=None, cyclists=None):
+    def __init__(self, teams=None, cyclists=None, races=None):
         self.teams = teams or []
         self.cyclists = cyclists or []
+        self.races = races or []
         self._team_index = {}
         self._cyclist_by_last = {}
         self._build_indexes()
@@ -101,7 +102,7 @@ class StartlistDatabase:
     @classmethod
     def from_sqlite(cls, db_path):
         """Load from a SQLite database (converted CDB)."""
-        teams, cyclists = [], []
+        teams, cyclists, races = [], [], []
         try:
             with sqlite3.connect(db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -109,7 +110,7 @@ class StartlistDatabase:
 
                 cursor.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' "
-                    "AND name IN ('DYN_team', 'DYN_cyclist')"
+                    "AND name IN ('DYN_team', 'DYN_cyclist', 'STA_race')"
                 )
                 existing = {row[0] for row in cursor.fetchall()}
 
@@ -120,16 +121,21 @@ class StartlistDatabase:
                 if 'DYN_cyclist' in existing:
                     cursor.execute("SELECT * FROM [DYN_cyclist]")
                     cyclists = [dict(row) for row in cursor.fetchall()]
+
+                if 'STA_race' in existing:
+                    cursor.execute("SELECT * FROM [STA_race]")
+                    races = [dict(row) for row in cursor.fetchall()]
         except Exception:
             pass
-        return cls(teams, cyclists)
+        return cls(teams, cyclists, races)
 
     @classmethod
     def from_csv_folder(cls, folder):
-        """Load from a folder containing DYN_team.csv and DYN_cyclist.csv."""
+        """Load from a folder containing DYN_team.csv, DYN_cyclist.csv, etc."""
         teams = cls._load_csv(os.path.join(folder, 'DYN_team.csv'))
         cyclists = cls._load_csv(os.path.join(folder, 'DYN_cyclist.csv'))
-        return cls(teams, cyclists)
+        races = cls._load_csv(os.path.join(folder, 'STA_race.csv'))
+        return cls(teams, cyclists, races)
 
     @staticmethod
     def _load_csv(path):

@@ -14,7 +14,7 @@ Two tabs:
 import gc
 import os
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+from tkinter import END, filedialog, messagebox, scrolledtext, ttk
 
 import core.converter as converter
 from core.startlist import (
@@ -22,6 +22,7 @@ from core.startlist import (
     apply_multiplayer_startlist,
 )
 from ui.ui_utils import run_async
+
 
 # databases/ folder next to main.py
 DATABASES_DIR = os.path.join(
@@ -138,18 +139,25 @@ class StartlistView:
         tk.Button(row, text="Browse...", command=self._browse_file).pack(
             side='left', padx=(6, 0))
 
-        # Output file
-        out_frame = tk.LabelFrame(tab, text="Output XML file",
-                                  padx=8, pady=8)
-        out_frame.pack(fill='x', pady=(0, 8))
-        out_row = tk.Frame(out_frame)
-        out_row.pack(fill='x')
+        # Race selection (determines output filename)
+        race_frame = tk.LabelFrame(tab, text="Race", padx=8, pady=8)
+        race_frame.pack(fill='x', pady=(0, 8))
+        race_row = tk.Frame(race_frame)
+        race_row.pack(fill='x')
 
-        self.out_var = tk.StringVar(value="startlist.xml")
-        tk.Entry(out_row, textvariable=self.out_var, width=60).pack(
-            side='left', fill='x', expand=True)
-        tk.Button(out_row, text="Save as...",
-                  command=self._browse_output).pack(side='left', padx=(6, 0))
+        tk.Label(race_row, text="Select race:").pack(side='left')
+        self._race_map = {}        # display_name -> filename
+        self.race_combo = ttk.Combobox(race_row, state='readonly', width=50)
+        self.race_combo.pack(side='left', padx=(6, 0), fill='x', expand=True)
+
+        self.out_var = tk.StringVar()
+        self.race_filename_label = tk.Label(
+            race_frame, textvariable=self.out_var,
+            fg="#888", font=("Segoe UI", 9), anchor='w',
+        )
+        self.race_filename_label.pack(fill='x', pady=(4, 0))
+        self.race_combo.bind(
+            '<<ComboboxSelected>>', self._on_race_selected)
 
         # Convert button
         btn_frame = tk.Frame(tab)
@@ -252,10 +260,12 @@ class StartlistView:
         if not name:
             self.db = None
             self.db_status.config(text="No database selected")
+            self._populate_races()
             return
 
         db_path = os.path.join(DATABASES_DIR, name)
         self.db = StartlistDatabase.from_csv_folder(db_path)
+        self._populate_races()
 
         if self.db.loaded:
             msg = (f"Database '{name}' loaded: {len(self.db.teams)} teams, "
@@ -284,6 +294,7 @@ class StartlistView:
             self.db = StartlistDatabase.from_sqlite(temp_path)
             # Clear dropdown selection to show CDB is active
             self.db_combo.set('')
+            self._populate_races()
             if self.db.loaded:
                 msg = (f"CDB loaded: {len(self.db.teams)} teams, "
                        f"{len(self.db.cyclists)} cyclists")
@@ -332,14 +343,26 @@ class StartlistView:
         if path:
             self.file_var.set(path)
 
-    def _browse_output(self):
-        path = filedialog.asksaveasfilename(
-            title="Save startlist XML as",
-            defaultextension=".xml",
-            filetypes=[("XML files", "*.xml"), ("All files", "*.*")],
-        )
-        if path:
-            self.out_var.set(path)
+    def _populate_races(self):
+        """Fill the race dropdown from the current database."""
+        self._race_map = {}
+        if self.db and self.db.races:
+            for r in self.db.races:
+                name = r.get('gene_sz_race_name', '')
+                filename = r.get('gene_sz_filename', '')
+                if name and filename:
+                    self._race_map[name] = filename
+
+        names = sorted(self._race_map.keys())
+        self.race_combo['values'] = names
+        self.race_combo.set('')
+        self.out_var.set('')
+
+    def _on_race_selected(self, event=None):
+        """Update the output filename when a race is selected."""
+        selected = self.race_combo.get()
+        filename = self._race_map.get(selected, '')
+        self.out_var.set(f"{filename}.xml" if filename else '')
 
     # ======================================================================
     # Singleplayer: Conversion
@@ -352,7 +375,11 @@ class StartlistView:
                                    "Please select an HTML file first.")
             return
 
-        output = self.out_var.get().strip() or 'startlist.xml'
+        output = self.out_var.get().strip()
+        if not output:
+            messagebox.showwarning("No race",
+                                   "Please select a race first.")
+            return
 
         self._clear_log()
         self._log(f"Reading: {filepath}")
