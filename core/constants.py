@@ -6,7 +6,7 @@ used throughout the application, centralized for easy maintenance.
 """
 
 # Pagination settings
-PAGE_SIZE = 50  # Number of rows per page in table view
+PAGE_SIZE = 200  # Number of rows per page in table view
 
 # Database operations
 DB_CHUNK_SIZE = 900  # SQLite parameter limit safety margin for bulk operations

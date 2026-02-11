@@ -23,18 +23,23 @@ class DatabaseManager:
 
     def __init__(self, db_path):
         """
-        Initialize database manager with connection to SQLite database.
+        Initialize database manager with persistent connection.
 
         Args:
             db_path (str): Path to the SQLite database file
-
-        Notes:
-            Initializes empty caches for schema and table mappings to improve
-            query performance on repeated operations.
         """
         self.db_path = db_path
+        self.conn = sqlite3.connect(db_path)
+        self.conn.execute("PRAGMA journal_mode=WAL")
         self.schema_cache = {}
         self.table_map_cache = None
+        self._fk_options_cache = {}
+
+    def close(self):
+        """Close the persistent database connection."""
+        if self.conn:
+            self.conn.close()
+            self.conn = None
 
     # ------------------------------------------------------------------
     # Table / column metadata
@@ -50,14 +55,13 @@ class DatabaseManager:
         Notes:
             Excludes SQLite system tables (sqlite_*).
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
-                "ORDER BY name"
-            )
-            return [row[0] for row in cursor.fetchall()]
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+            "ORDER BY name"
+        )
+        return [row[0] for row in cursor.fetchall()]
 
     def get_columns(self, table_name):
         """
@@ -76,12 +80,11 @@ class DatabaseManager:
         if table_name in self.schema_cache:
             return self.schema_cache[table_name]
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"PRAGMA table_info([{table_name}])")
-            columns = [col[1] for col in cursor.fetchall()]
-            self.schema_cache[table_name] = columns
-            return columns
+        cursor = self.conn.cursor()
+        cursor.execute(f"PRAGMA table_info([{table_name}])")
+        columns = [col[1] for col in cursor.fetchall()]
+        self.schema_cache[table_name] = columns
+        return columns
 
     # ------------------------------------------------------------------
     # Foreign key resolution helpers
@@ -142,17 +145,20 @@ class DatabaseManager:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_search_clause(columns, search_term):
+    def _build_search_clause(table_name, columns, search_term):
         """Build a WHERE clause for searching across all columns.
 
         Args:
+            table_name (str): Name of the table (for qualifying column names)
             columns (list[str]): Column names to search
             search_term (str): Term to search for
 
         Returns:
             tuple: (where_sql, params)
         """
-        where_sql = " OR ".join(f"CAST([{col}] AS TEXT) LIKE ?" for col in columns)
+        where_sql = " OR ".join(
+            f"CAST([{table_name}].[{col}] AS TEXT) LIKE ?" for col in columns
+        )
         params = [f"%{search_term}%"] * len(columns)
         return where_sql, params
 
@@ -177,44 +183,47 @@ class DatabaseManager:
         Returns:
             tuple: (columns, rows) where columns is list[str] and rows is list[tuple]
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
+        cursor = self.conn.cursor()
 
-            columns = self.get_columns(table_name)
-            select_fields = [f"[{c}]" for c in columns]
+        columns = self.get_columns(table_name)
+        select_fields = [f"[{table_name}].[{c}]" for c in columns]
+        joins = []
 
-            if lookup:
-                self._ensure_table_map(cursor)
-                for i, col in enumerate(columns):
-                    if col.startswith("fkID") and len(col) > 4:
-                        target_table = self._resolve_fk_target(col[4:])
-                        if target_table:
-                            try:
-                                pk, display = self._resolve_fk_display(cursor, target_table)
-                                if display:
-                                    select_fields[i] = (
-                                        f"(SELECT [{display}] FROM [{target_table}] "
-                                        f"WHERE [{target_table}].[{pk}] = [{table_name}].[{col}])"
-                                    )
-                            except Exception:
-                                pass
+        if lookup:
+            self._ensure_table_map(cursor)
+            for i, col in enumerate(columns):
+                if col.startswith("fkID") and len(col) > 4:
+                    target_table = self._resolve_fk_target(col[4:])
+                    if target_table:
+                        try:
+                            pk, display = self._resolve_fk_display(cursor, target_table)
+                            if display:
+                                alias = f"_fk{i}"
+                                select_fields[i] = f"[{alias}].[{display}]"
+                                joins.append(
+                                    f"LEFT JOIN [{target_table}] [{alias}] "
+                                    f"ON [{alias}].[{pk}] = [{table_name}].[{col}]"
+                                )
+                        except Exception:
+                            pass
 
-            query_cols = ", ".join(select_fields)
-            sql = f"SELECT {query_cols} FROM [{table_name}]"
-            params = []
+        query_cols = ", ".join(select_fields)
+        join_clause = " ".join(joins)
+        sql = f"SELECT {query_cols} FROM [{table_name}] {join_clause}"
+        params = []
 
-            if search_term:
-                where_sql, params = self._build_search_clause(columns, search_term)
-                sql += f" WHERE {where_sql}"
+        if search_term:
+            where_sql, params = self._build_search_clause(table_name, columns, search_term)
+            sql += f" WHERE {where_sql}"
 
-            if sort_col:
-                sql += f" ORDER BY [{sort_col}] {'DESC' if sort_reverse else 'ASC'}"
+        if sort_col:
+            sql += f" ORDER BY [{table_name}].[{sort_col}] {'DESC' if sort_reverse else 'ASC'}"
 
-            if limit is not None:
-                sql += f" LIMIT {limit} OFFSET {offset}"
+        if limit is not None:
+            sql += f" LIMIT {limit} OFFSET {offset}"
 
-            cursor.execute(sql, params)
-            return columns, cursor.fetchall()
+        cursor.execute(sql, params)
+        return columns, cursor.fetchall()
 
     def get_row_count(self, table_name, search_term=None):
         """
@@ -227,18 +236,17 @@ class DatabaseManager:
         Returns:
             int: Number of rows matching the criteria
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            if search_term:
-                columns = self.get_columns(table_name)
-                where_sql, params = self._build_search_clause(columns, search_term)
-                cursor.execute(
-                    f"SELECT COUNT(*) FROM [{table_name}] WHERE {where_sql}",
-                    params,
-                )
-            else:
-                cursor.execute(f"SELECT COUNT(*) FROM [{table_name}]")
-            return cursor.fetchone()[0]
+        cursor = self.conn.cursor()
+        if search_term:
+            columns = self.get_columns(table_name)
+            where_sql, params = self._build_search_clause(table_name, columns, search_term)
+            cursor.execute(
+                f"SELECT COUNT(*) FROM [{table_name}] WHERE {where_sql}",
+                params,
+            )
+        else:
+            cursor.execute(f"SELECT COUNT(*) FROM [{table_name}]")
+        return cursor.fetchone()[0]
 
     # ------------------------------------------------------------------
     # Single-row operations
@@ -255,11 +263,10 @@ class DatabaseManager:
         Returns:
             int: Next available ID (current maximum + 1, or 1 if table is empty)
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT MAX([{id_column}]) FROM [{table}]")
-            result = cursor.fetchone()[0]
-            return (int(result) if result is not None else 0) + 1
+        cursor = self.conn.cursor()
+        cursor.execute(f"SELECT MAX([{id_column}]) FROM [{table}]")
+        result = cursor.fetchone()[0]
+        return (int(result) if result is not None else 0) + 1
 
     def get_row_data(self, table, pk_col, pk_val):
         """
@@ -273,10 +280,34 @@ class DatabaseManager:
         Returns:
             tuple: Row values
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT * FROM [{table}] WHERE [{pk_col}]=?", (pk_val,))
-            return cursor.fetchone()
+        cursor = self.conn.cursor()
+        cursor.execute(f"SELECT * FROM [{table}] WHERE [{pk_col}]=?", (pk_val,))
+        return cursor.fetchone()
+
+    def get_rows_data(self, table, pk_col, pk_vals):
+        """
+        Fetch multiple rows by primary key values in a single query.
+
+        Args:
+            table (str): Table name
+            pk_col (str): Primary key column name
+            pk_vals (list): List of primary key values to fetch
+
+        Returns:
+            dict: Mapping of pk_val -> tuple of row values
+        """
+        result = {}
+        for i in range(0, len(pk_vals), DB_CHUNK_SIZE):
+            chunk = pk_vals[i:i + DB_CHUNK_SIZE]
+            placeholders = ", ".join(["?"] * len(chunk))
+            cursor = self.conn.cursor()
+            cursor.execute(
+                f"SELECT * FROM [{table}] WHERE [{pk_col}] IN ({placeholders})",
+                chunk,
+            )
+            for row in cursor.fetchall():
+                result[row[0]] = row
+        return result
 
     def update_cell(self, table, column, value, pk_col, pk_val):
         """
@@ -289,12 +320,12 @@ class DatabaseManager:
             pk_col (str): Primary key column name
             pk_val: Primary key value identifying the row
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                f"UPDATE [{table}] SET [{column}]=? WHERE [{pk_col}]=?",
-                (value, pk_val),
-            )
-            conn.commit()
+        self.conn.execute(
+            f"UPDATE [{table}] SET [{column}]=? WHERE [{pk_col}]=?",
+            (value, pk_val),
+        )
+        self.conn.commit()
+        self._fk_options_cache.clear()
 
     def delete_row(self, table, pk_col, pk_val):
         """
@@ -305,9 +336,9 @@ class DatabaseManager:
             pk_col (str): Primary key column name
             pk_val: Primary key value identifying the row to delete
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(f"DELETE FROM [{table}] WHERE [{pk_col}]=?", (pk_val,))
-            conn.commit()
+        self.conn.execute(f"DELETE FROM [{table}] WHERE [{pk_col}]=?", (pk_val,))
+        self.conn.commit()
+        self._fk_options_cache.clear()
 
     def delete_rows(self, table, pk_col, pk_vals):
         """
@@ -318,15 +349,15 @@ class DatabaseManager:
             pk_col (str): Primary key column name
             pk_vals (list): List of primary key values to delete
         """
-        with sqlite3.connect(self.db_path) as conn:
-            for i in range(0, len(pk_vals), DB_CHUNK_SIZE):
-                chunk = pk_vals[i:i + DB_CHUNK_SIZE]
-                placeholders = ", ".join(["?"] * len(chunk))
-                conn.execute(
-                    f"DELETE FROM [{table}] WHERE [{pk_col}] IN ({placeholders})",
-                    chunk,
-                )
-            conn.commit()
+        for i in range(0, len(pk_vals), DB_CHUNK_SIZE):
+            chunk = pk_vals[i:i + DB_CHUNK_SIZE]
+            placeholders = ", ".join(["?"] * len(chunk))
+            self.conn.execute(
+                f"DELETE FROM [{table}] WHERE [{pk_col}] IN ({placeholders})",
+                chunk,
+            )
+        self.conn.commit()
+        self._fk_options_cache.clear()
 
     def insert_row(self, table, columns, values):
         """
@@ -337,18 +368,25 @@ class DatabaseManager:
             columns (list[str]): List of column names
             values (list): List of values corresponding to columns
         """
-        with sqlite3.connect(self.db_path) as conn:
-            placeholders = ", ".join(["?"] * len(values))
-            col_names = ", ".join(f"[{c}]" for c in columns)
-            conn.execute(
-                f"INSERT INTO [{table}] ({col_names}) VALUES ({placeholders})",
-                values,
-            )
-            conn.commit()
+        placeholders = ", ".join(["?"] * len(values))
+        col_names = ", ".join(f"[{c}]" for c in columns)
+        self.conn.execute(
+            f"INSERT INTO [{table}] ({col_names}) VALUES ({placeholders})",
+            values,
+        )
+        self.conn.commit()
+        self._fk_options_cache.clear()
 
     # ------------------------------------------------------------------
     # Foreign key dropdown options
     # ------------------------------------------------------------------
+
+    def invalidate_fk_cache(self, fk_column=None):
+        """Clear FK options cache, optionally for a specific column only."""
+        if fk_column:
+            self._fk_options_cache.pop(fk_column, None)
+        else:
+            self._fk_options_cache.clear()
 
     def get_fk_options(self, fk_column):
         """
@@ -363,27 +401,31 @@ class DatabaseManager:
         if not fk_column.startswith("fkID") or len(fk_column) <= 4:
             return None
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            self._ensure_table_map(cursor)
+        if fk_column in self._fk_options_cache:
+            return self._fk_options_cache[fk_column]
 
-            target_table = self._resolve_fk_target(fk_column[4:])
-            if not target_table:
-                return None
+        cursor = self.conn.cursor()
+        self._ensure_table_map(cursor)
 
-            try:
-                pk, display = self._resolve_fk_display(cursor, target_table)
-                if display:
-                    cursor.execute(
-                        f"SELECT [{display}], [{pk}] FROM [{target_table}] "
-                        f"ORDER BY [{display}]"
-                    )
-                    return {
-                        str(row[0]): row[1]
-                        for row in cursor.fetchall()
-                        if row[0] is not None
-                    }
-            except Exception:
-                pass
+        target_table = self._resolve_fk_target(fk_column[4:])
+        if not target_table:
+            return None
+
+        try:
+            pk, display = self._resolve_fk_display(cursor, target_table)
+            if display:
+                cursor.execute(
+                    f"SELECT [{display}], [{pk}] FROM [{target_table}] "
+                    f"ORDER BY [{display}]"
+                )
+                result = {
+                    str(row[0]): row[1]
+                    for row in cursor.fetchall()
+                    if row[0] is not None
+                }
+                self._fk_options_cache[fk_column] = result
+                return result
+        except Exception:
+            pass
 
         return None

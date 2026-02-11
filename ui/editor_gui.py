@@ -278,6 +278,8 @@ class PCMDatabaseTools:
         if self.unsaved_changes:
             if not messagebox.askyesno("Unsaved Changes", "You have unsaved changes. Are you sure you want to close?"):
                 return
+        if self.db:
+            self.db.close()
         self.db = None
         self.current_table = None
         self.unsaved_changes = False
@@ -353,25 +355,23 @@ class PCMDatabaseTools:
             return
 
         try:
-            import sqlite3
-            with sqlite3.connect(self.db.db_path) as conn:
-                cursor = conn.cursor()
+            cursor = self.db.conn.cursor()
 
-                cursor.execute("PRAGMA table_info([GAM_career_data])")
-                columns = [col[1] for col in cursor.fetchall()]
+            cursor.execute("PRAGMA table_info([GAM_career_data])")
+            columns = [col[1] for col in cursor.fetchall()]
 
-                if "value" not in columns:
-                    messagebox.showerror("Error", "Column 'value' not found in GAM_career_data table")
-                    return
+            if "value" not in columns:
+                messagebox.showerror("Error", "Column 'value' not found in GAM_career_data table")
+                return
 
-                cursor.execute("SELECT value FROM [GAM_career_data] WHERE UID = 1")
-                row = cursor.fetchone()
+            cursor.execute("SELECT value FROM [GAM_career_data] WHERE UID = 1")
+            row = cursor.fetchone()
 
-                if not row:
-                    messagebox.showerror("Error", "No career data found (UID = 1 not found in GAM_career_data)")
-                    return
+            if not row:
+                messagebox.showerror("Error", "No career data found (UID = 1 not found in GAM_career_data)")
+                return
 
-                current_value = row[0]
+            current_value = row[0]
 
             new_value = simpledialog.askinteger(
                 "Change Team Budget",
@@ -515,12 +515,7 @@ class PCMDatabaseTools:
 
             _, all_rows = self.db.fetch_data(table_name, limit=None)
 
-            deleted_rows = []
-            for row in all_rows:
-                pk = row[0]
-                data = list(self.db.get_row_data(table_name, pk_col, pk))
-                if data:
-                    deleted_rows.append({"pk": pk, "data": data})
+            deleted_rows = [{"pk": row[0], "data": list(row)} for row in all_rows]
 
             pk_vals = [row[0] for row in all_rows]
             self.db.delete_rows(table_name, pk_col, pk_vals)
@@ -555,6 +550,7 @@ class PCMDatabaseTools:
         return frame
 
     def on_table_select(self, table_name):
+        self.search_var.set("")
         self.table_view.set_table(table_name)
 
     def on_close(self):
@@ -570,4 +566,6 @@ class PCMDatabaseTools:
         except (tk.TclError, AttributeError):
             pass
         self.state.save_settings(self.normal_geometry, is_maximized, self.lookup_var.get())
+        if self.db:
+            self.db.close()
         self.root.destroy()

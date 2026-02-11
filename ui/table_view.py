@@ -8,7 +8,7 @@ with support for inline editing, sorting, searching, and column visibility.
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from core.constants import PAGE_SIZE, DEFAULT_COLUMN_WIDTH
+from core.constants import PAGE_SIZE, DEFAULT_COLUMN_WIDTH, RESIZE_SAVE_DELAY
 
 
 class TableView:
@@ -52,6 +52,7 @@ class TableView:
         self.total_rows = 0
         self.loading_data = False
         self.last_saved_widths = {}
+        self._resize_timer = None
         self.all_columns = []
 
         self._setup_ui()
@@ -129,8 +130,9 @@ class TableView:
         """
         visible = self.state.get_visible_columns(self.current_table)
         if visible is not None:
-            display_columns = [col for col in columns if col in visible]
-            indices = [i for i, col in enumerate(columns) if col in visible]
+            visible_set = set(visible)
+            display_columns = [col for col in columns if col in visible_set]
+            indices = [i for i, col in enumerate(columns) if col in visible_set]
         else:
             display_columns = columns
             indices = list(range(len(columns)))
@@ -267,7 +269,7 @@ class TableView:
             self.commit_editor()
 
     def on_column_resize(self, event):
-        """Save column widths when user resizes a column."""
+        """Save column widths when user resizes a column (debounced)."""
         if not self.current_table or not self.tree["columns"]:
             return
 
@@ -276,8 +278,13 @@ class TableView:
             widths[col] = self.tree.column(col, "width")
 
         if widths != self.last_saved_widths:
-            self.state.set_column_widths(self.current_table, widths)
             self.last_saved_widths = widths.copy()
+            if self._resize_timer:
+                self.parent.after_cancel(self._resize_timer)
+            self._resize_timer = self.parent.after(
+                RESIZE_SAVE_DELAY,
+                lambda: self.state.set_column_widths(self.current_table, widths),
+            )
 
     # ------------------------------------------------------------------
     # Inline editing
@@ -467,14 +474,20 @@ class TableView:
             columns = self.db.get_columns(self.current_table)
             pk_col = columns[0]
 
-            for item in selection:
-                pk_val = self.tree.item(item, "values")[0]
-                row_data = list(self.db.get_row_data(self.current_table, pk_col, pk_val))
+            # Batch fetch source rows and compute IDs once
+            pk_vals = [self.tree.item(item, "values")[0] for item in selection]
+            rows_map = self.db.get_rows_data(self.current_table, pk_col, pk_vals)
+            next_id = self.db.get_max_id(self.current_table, pk_col)
 
-                new_id = self.db.get_max_id(self.current_table, pk_col)
-                row_data[0] = new_id
+            for pk_val in pk_vals:
+                source_data = rows_map.get(pk_val)
+                if not source_data:
+                    continue
+                row_data = list(source_data)
+                row_data[0] = next_id
                 self.db.insert_row(self.current_table, columns, row_data)
-                added_rows.append({"pk": new_id, "data": row_data})
+                added_rows.append({"pk": next_id, "data": row_data})
+                next_id += 1
 
             if added_rows:
                 action = {
@@ -524,10 +537,11 @@ class TableView:
         pk_col = columns[0]
         pk_vals = [self.tree.item(item, "values")[0] for item in selection]
 
-        # Capture data for undo before deleting
+        # Capture data for undo before deleting (batch fetch)
+        rows_map = self.db.get_rows_data(self.current_table, pk_col, pk_vals)
         deleted_rows = []
         for pk in pk_vals:
-            data = self.db.get_row_data(self.current_table, pk_col, pk)
+            data = rows_map.get(pk)
             if data:
                 deleted_rows.append({"pk": pk, "data": list(data)})
 

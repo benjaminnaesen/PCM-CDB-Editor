@@ -38,16 +38,13 @@ class TestDatabaseManager(unittest.TestCase):
 
     def tearDown(self):
         """Clean up temporary database file."""
-        # Remove reference to DatabaseManager to close connections
+        if self.db:
+            self.db.close()
         self.db = None
-        # Small delay to ensure Windows releases the file lock
-        import time
-        time.sleep(0.1)
         if os.path.exists(self.db_file.name):
             try:
                 os.remove(self.db_file.name)
             except PermissionError:
-                # On Windows, file might still be locked - ignore for cleanup
                 pass
 
     def test_get_table_list(self):
@@ -203,6 +200,40 @@ class TestDatabaseManager(unittest.TestCase):
 
         options = self.db.get_fk_options("value")
         self.assertIsNone(options)
+
+    def test_close(self):
+        """Test explicit connection close."""
+        self.db.close()
+        self.assertIsNone(self.db.conn)
+
+    def test_get_rows_data_batch(self):
+        """Test batch fetching multiple rows by primary key."""
+        self.db.insert_row("test_table", ["id", "name", "value"], [3, "Item3", 300])
+
+        rows_map = self.db.get_rows_data("test_table", "id", [1, 3])
+        self.assertEqual(len(rows_map), 2)
+        self.assertEqual(rows_map[1], (1, 'Item1', 100))
+        self.assertEqual(rows_map[3], (3, 'Item3', 300))
+
+        # Non-existent keys should be absent
+        rows_map = self.db.get_rows_data("test_table", "id", [999])
+        self.assertEqual(len(rows_map), 0)
+
+        # Empty list
+        rows_map = self.db.get_rows_data("test_table", "id", [])
+        self.assertEqual(len(rows_map), 0)
+
+    def test_fk_options_cache(self):
+        """Test FK options caching and invalidation."""
+        result = self.db.get_fk_options("name")
+        self.assertIsNone(result)
+
+        # Verify cache is initially empty
+        self.assertEqual(len(self.db._fk_options_cache), 0)
+
+        # Invalidate should not raise on empty cache
+        self.db.invalidate_fk_cache()
+        self.db.invalidate_fk_cache("fkIDsomething")
 
 
 if __name__ == '__main__':
