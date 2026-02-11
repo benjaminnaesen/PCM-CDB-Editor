@@ -1,7 +1,37 @@
+# Test CDB files
 *.cdb
-__pycache__/
-.venv/
-session_config.json
 OfficialRelease.cdb
 OfficialRelease.cdb.beforeImport
 OfficialRelease.sqlite
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# PyInstaller build artifacts
+dist/
+build/
+*.spec.bak
+
+# User settings (use session_config.example.json for template)
+session_config.json
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Accidental Windows command output files
+nul

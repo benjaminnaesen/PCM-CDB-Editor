@@ -5,9 +5,19 @@ This module wraps the external SQLiteExporter tool to convert between
 Pro Cycling Manager's proprietary CDB format and SQLite databases.
 """
 
-import os, subprocess, shutil, tempfile
+import os, subprocess, shutil, tempfile, sys
 
-TOOL_PATH = os.path.join("SQLiteExporter", "SQLiteExporter.exe")
+if getattr(sys, 'frozen', False):
+    # Running as compiled executable (PyInstaller)
+    # PyInstaller 5.0+ puts data files in _internal folder
+    base_dir = os.path.dirname(sys.executable)
+    internal_path = os.path.join(base_dir, "_internal")
+    BASE_PATH = internal_path if os.path.exists(internal_path) else base_dir
+else:
+    # Running from source: use the parent directory of 'core'
+    BASE_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+TOOL_PATH = os.path.join(BASE_PATH, "SQLiteExporter", "SQLiteExporter.exe")
 
 def export_cdb_to_sqlite(cdb_path):
     """
@@ -32,6 +42,9 @@ def export_cdb_to_sqlite(cdb_path):
         The SQLite file is created in a temporary location to avoid
         cluttering the user's working directory.
     """
+    if not os.path.exists(TOOL_PATH):
+        raise FileNotFoundError(f"SQLiteExporter tool not found at: {TOOL_PATH}")
+
     abs_cdb_path = os.path.abspath(cdb_path)
     temp_sqlite = os.path.join(tempfile.gettempdir(), "pcm_working_db.sqlite")
     local_sqlite = abs_cdb_path.replace(".cdb", ".sqlite")

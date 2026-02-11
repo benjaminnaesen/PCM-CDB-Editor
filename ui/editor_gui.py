@@ -1,3 +1,10 @@
+"""
+Main application window and controller.
+
+Coordinates all UI components, manages file operations,
+and handles application lifecycle.
+"""
+
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox, simpledialog
 import gc, os, sys
@@ -13,7 +20,27 @@ from ui.table_view import TableView
 from ui.column_manager_dialog import ColumnManagerDialog
 
 class CDBEditor:
+    """
+    Main application controller for PCM CDB Editor.
+
+    Manages:
+        - Welcome screen and editor frame switching
+        - CDB file loading/saving via SQLiteExporter
+        - Menu and toolbar actions
+        - Undo/redo coordination
+        - Search with debouncing
+        - Lookup mode toggle
+        - CSV import/export operations
+        - Application settings persistence
+    """
+
     def __init__(self, root):
+        """
+        Initialize main application window.
+
+        Args:
+            root: Tkinter root window
+        """
         self.root = root
         self.root.title("PCM CDB Editor")
         self.state = AppState("session_config.json")

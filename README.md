@@ -17,6 +17,8 @@ A desktop GUI application for editing Pro Cycling Manager (PCM) game database fi
 - **CSV Operations**:
   - Export individual tables to CSV
   - Import CSV data back into tables
+  - Export/Import all tables at once
+- **Column Management**: Show/hide columns with saveable presets
 - **Row Operations**: Duplicate or delete rows via right-click context menu
 - **Session Persistence**: Remembers your window size, favorites, recent files, and settings
 - **Pagination**: Efficiently handles large tables with lazy loading
@@ -163,4 +165,10 @@ Contributions are welcome! Please follow these guidelines:
 
 ## License
 
-[Specify license here - e.g., MIT, GPL-3.0, or Proprietary]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+**⚠️ Important:** Always backup your .cdb files before editing! While this tool has undo/redo support, it's always safer to keep backups of your game files.
+
+**🎮 Happy modding!**

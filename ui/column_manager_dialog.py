@@ -1,9 +1,33 @@
+"""
+Column visibility management dialog.
+
+Provides UI for showing/hiding columns, saving/loading presets,
+and searching through available columns.
+"""
+
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 
 
 class ColumnManagerDialog:
+    """
+    Modal dialog for managing column visibility with preset support.
+
+    Features:
+        - Checkboxes for all columns (primary key always visible)
+        - Search/filter columns by name
+        - Save/load/delete column visibility presets
+        - Show All / Hide All buttons
+    """
     def __init__(self, parent, table_view, app_state):
+        """
+        Initialize column manager dialog.
+
+        Args:
+            parent: Parent tkinter window
+            table_view (TableView): Table view instance
+            app_state (AppState): Application state manager
+        """
         self.parent = parent
         self.table_view = table_view
         self.state = app_state
@@ -124,7 +148,11 @@ class ColumnManagerDialog:
             self.column_checkboxes[col] = cb
 
     def filter_columns(self, *args):
-        """Filter visible checkboxes based on search term."""
+        """
+        Filter visible checkboxes based on search term.
+
+        Shows/hides checkboxes that match the filter text.
+        """
         search_term = self.search_var.get().lower()
 
         for col, cb in self.column_checkboxes.items():
@@ -134,23 +162,31 @@ class ColumnManagerDialog:
                 cb.pack_forget()
 
     def show_all_columns(self):
-        """Check all column checkboxes."""
+        """Check all column checkboxes (select all for visibility)."""
         for col, var in self.column_vars.items():
             var.set(True)
 
     def hide_all_columns(self):
-        """Uncheck all column checkboxes (except primary key)."""
+        """
+        Uncheck all column checkboxes (except primary key).
+
+        Primary key is always kept visible to maintain data integrity.
+        """
         for i, (col, var) in enumerate(self.column_vars.items()):
             if i > 0:  # Don't hide primary key
                 var.set(False)
 
     def update_preset_list(self):
-        """Update the preset dropdown list."""
+        """Refresh preset dropdown with saved presets from app state."""
         presets = self.state.get_column_presets(self.current_table)
         self.preset_combo['values'] = list(presets.keys())
 
     def save_preset(self):
-        """Save current column selection as a preset."""
+        """
+        Save current column selection as a named preset.
+
+        Prompts user for preset name and stores selected columns.
+        """
         preset_name = simpledialog.askstring(
             "Save Preset",
             "Enter preset name:",
@@ -166,7 +202,11 @@ class ColumnManagerDialog:
             messagebox.showinfo("Success", f"Preset '{preset_name}' saved successfully.")
 
     def load_preset(self):
-        """Load a saved preset."""
+        """
+        Load a saved preset from dropdown.
+
+        Updates checkboxes to match the selected preset's column visibility.
+        """
         preset_name = self.preset_var.get()
         if not preset_name:
             messagebox.showwarning("No Preset", "Please select a preset to load.")
@@ -180,7 +220,11 @@ class ColumnManagerDialog:
                 var.set(col in preset_columns)
 
     def delete_preset(self):
-        """Delete the selected preset."""
+        """
+        Delete the currently selected preset.
+
+        Requires confirmation before deletion.
+        """
         preset_name = self.preset_var.get()
         if not preset_name:
             messagebox.showwarning("No Preset", "Please select a preset to delete.")
@@ -192,7 +236,11 @@ class ColumnManagerDialog:
             self.preset_var.set("")
 
     def apply_changes(self):
-        """Apply the column visibility changes."""
+        """
+        Apply selected column visibility to table view.
+
+        Validates that primary key remains visible before applying.
+        """
         selected_columns = [col for col, var in self.column_vars.items() if var.get()]
 
         # Ensure at least the primary key is selected

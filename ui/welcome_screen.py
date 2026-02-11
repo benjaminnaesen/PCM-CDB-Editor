@@ -1,15 +1,39 @@
+"""
+Welcome screen widget with recent files list.
+
+Displays application branding, primary CDB file open button,
+and list of recently opened files with tooltips.
+"""
+
 import tkinter as tk
 import os
 from tkinter import messagebox
 from ui.ui_utils import ToolTip
 
 class WelcomeScreen:
+    """
+    Landing page shown when no database is loaded.
+
+    Features:
+        - Large "Open CDB File" button
+        - Recent files list with full path tooltips
+        - Auto-removes missing files from recent list
+    """
     def __init__(self, root_frame, app_state, load_callback):
+        """
+        Initialize welcome screen.
+
+        Args:
+            root_frame: Parent tkinter frame
+            app_state (AppState): Application state manager
+            load_callback (callable): Function to call when opening a file
+        """
         self.frame = root_frame
         self.state = app_state
         self.load_callback = load_callback
 
     def show(self):
+        """Display the welcome screen with recent files."""
         for widget in self.frame.winfo_children(): widget.destroy()
         self.frame.pack(fill=tk.BOTH, expand=True)
         
@@ -27,6 +51,12 @@ class WelcomeScreen:
                 btn.pack(fill=tk.X, pady=1); ToolTip(btn, path)
 
     def load_recent(self, path):
+        """
+        Load a recent file, removing it from list if not found.
+
+        Args:
+            path (str): File path to load
+        """
         if not os.path.exists(path):
             messagebox.showerror("Error", f"File not found:\n{path}")
             if path in self.state.recents:
@@ -36,4 +66,5 @@ class WelcomeScreen:
         self.load_callback(path)
 
     def hide(self):
+        """Hide the welcome screen (when database is loaded)."""
         self.frame.pack_forget()

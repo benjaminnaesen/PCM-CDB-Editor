@@ -1,9 +1,37 @@
+"""
+Table view widget with editing, pagination, and column management.
+
+Main data grid component for viewing and editing database tables
+with support for inline editing, sorting, searching, and column visibility.
+"""
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 from core.constants import PAGE_SIZE, SEARCH_DEBOUNCE_DELAY, DEFAULT_COLUMN_WIDTH, RESIZE_SAVE_DELAY
 
 class TableView:
+    """
+    Treeview-based table editor with pagination and inline editing.
+
+    Features:
+        - Paginated data loading (50 rows per page)
+        - Inline cell editing with Tab/Arrow navigation
+        - Column sorting (click headers)
+        - Right-click context menu for row operations
+        - Foreign key dropdown editors
+        - Column show/hide support
+        - Persistent column widths
+        - Undo/redo integration
+    """
     def __init__(self, parent, app_state, on_change_callback):
+        """
+        Initialize table view widget.
+
+        Args:
+            parent: Parent tkinter widget
+            app_state (AppState): Application state manager
+            on_change_callback (callable): Called when data is modified
+        """
         self.parent = parent
         self.state = app_state
         self.on_change = on_change_callback
@@ -50,12 +78,24 @@ class TableView:
         self.column_menu.add_command(label="Hide Column", command=self.hide_column)
 
     def set_db(self, db):
+        """
+        Set database manager instance.
+
+        Args:
+            db (DatabaseManager): Database manager to use
+        """
         self.db = db
         self.current_table = None
         self.tree.delete(*self.tree.get_children())
         self.tree["columns"] = []
 
     def set_table(self, table_name):
+        """
+        Switch to viewing a different table.
+
+        Args:
+            table_name (str): Name of table to display
+        """
         self.current_table = table_name
         self.sort_state = {"column": None, "reverse": False}
         self.load_table_data()
@@ -73,10 +113,29 @@ class TableView:
         if float(last) > 0.95: self.load_more_data()
 
     def sort_column(self, col, reverse):
+        """
+        Sort table by column.
+
+        Args:
+            col (str): Column name to sort by
+            reverse (bool): True for descending, False for ascending
+        """
         self.sort_state = {"column": col, "reverse": reverse}
         self.load_table_data()
 
     def load_table_data(self, start_offset=0):
+        """
+        Load and display table data with pagination.
+
+        Args:
+            start_offset (int): Row offset for pagination (default: 0)
+
+        Notes:
+            - Loads PAGE_SIZE rows at a time
+            - Applies current search filter and sort order
+            - Respects column visibility settings
+            - Sets default sort to primary key if not set
+        """
         if self.active_editor: self.cancel_edit()
         if not self.current_table or not self.db: return
         self.tree.grid_remove()
@@ -134,6 +193,7 @@ class TableView:
         self.tree.grid()
 
     def load_more_data(self):
+        """Load next page of data when scrolling to bottom."""
         if not self.current_table or self.loading_data or self.offset >= self.total_rows: return
         self.loading_data = True
         _, row_data = self.db.fetch_data(self.current_table, self.search_term, self.lookup_mode, self.page_size, self.offset, self.sort_state["column"], self.sort_state["reverse"])
@@ -283,6 +343,11 @@ class TableView:
         except Exception as e: messagebox.showerror("Error", str(e))
 
     def duplicate_row(self):
+        """
+        Duplicate selected row(s) with new auto-incremented IDs.
+
+        Creates copies of all selected rows and adds undo action.
+        """
         selection = self.tree.selection()
         if not selection: return
 
@@ -339,6 +404,11 @@ class TableView:
         except Exception as e: messagebox.showerror("Error", str(e))
 
     def delete_row(self):
+        """
+        Delete selected row(s) after confirmation.
+
+        Captures data for undo before deletion.
+        """
         selection = self.tree.selection()
         if not selection: return
         if messagebox.askyesno("Confirm", f"Delete {len(selection)} row(s)?"):
