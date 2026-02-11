@@ -9,10 +9,14 @@ PCM-compatible XML output.
 import csv
 import os
 import re
+import shutil
 import sqlite3
+import tempfile
 import unicodedata
 
 from bs4 import BeautifulSoup
+
+from core.constants import DB_CHUNK_SIZE
 
 
 # ---------------------------------------------------------------------------
@@ -542,3 +546,80 @@ class PCMXmlWriter:
                 + ", ".join(unmatched_riders))
 
         return True
+
+
+# ===========================================================================
+# Multiplayer database modification
+# ===========================================================================
+
+FREE_AGENT_TEAM_ID = 119
+
+
+def apply_multiplayer_startlist(db_path, team_ids, rider_ids):
+    """Create a modified database where non-startlist riders are moved out.
+
+    For every cyclist whose team is in *team_ids* but whose own ID is NOT
+    in *rider_ids*, set ``fkIDteam`` to 119 (free-agent pool).  Riders on
+    teams not in the startlist are left untouched.
+
+    Args:
+        db_path:   Path to the source SQLite database.
+        team_ids:  Set/collection of matched team ID strings.
+        rider_ids: Set/collection of matched cyclist ID strings.
+
+    Returns:
+        (working_path, moved_count, contracts_removed) — path to the
+        modified SQLite copy, number of riders moved to team 119, and
+        number of contract rows deleted.
+    """
+    working = os.path.join(tempfile.gettempdir(), "pcm_multiplayer_db.sqlite")
+    if os.path.exists(working):
+        os.remove(working)
+    shutil.copy2(db_path, working)
+
+    team_list = [str(t) for t in team_ids if t is not None]
+    rider_list = [str(r) for r in rider_ids if r is not None]
+
+    with sqlite3.connect(working) as conn:
+        cursor = conn.cursor()
+
+        # Build the WHERE clause with chunked IN parameters
+        # fkIDteam IN (participating teams) AND IDcyclist NOT IN (startlist)
+        team_placeholders = ", ".join("?" * len(team_list))
+        query = (
+            f"UPDATE [DYN_cyclist] SET fkIDteam = ? "
+            f"WHERE fkIDteam IN ({team_placeholders})"
+        )
+        params = [FREE_AGENT_TEAM_ID] + team_list
+
+        if rider_list:
+            # Chunk the rider exclusion list to stay within SQLite limits
+            for i in range(0, len(rider_list), DB_CHUNK_SIZE):
+                chunk = rider_list[i:i + DB_CHUNK_SIZE]
+                rider_placeholders = ", ".join("?" * len(chunk))
+                query += f" AND IDcyclist NOT IN ({rider_placeholders})"
+                params.extend(chunk)
+
+        cursor.execute(query, params)
+        moved = cursor.rowcount
+
+        # Clear contracts for the moved riders (same WHERE logic)
+        del_query = (
+            f"DELETE FROM [DYN_contract_cyclist] "
+            f"WHERE fkIDteam IN ({team_placeholders})"
+        )
+        del_params = list(team_list)
+
+        if rider_list:
+            for i in range(0, len(rider_list), DB_CHUNK_SIZE):
+                chunk = rider_list[i:i + DB_CHUNK_SIZE]
+                rp = ", ".join("?" * len(chunk))
+                del_query += f" AND fkIDcyclist NOT IN ({rp})"
+                del_params.extend(chunk)
+
+        cursor.execute(del_query, del_params)
+        contracts_removed = cursor.rowcount
+
+        conn.commit()
+
+    return working, moved, contracts_removed

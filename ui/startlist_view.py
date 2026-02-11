@@ -4,6 +4,11 @@ Startlist generator view.
 Full-frame view for converting saved HTML startlists from FirstCycling
 or ProCyclingStats into PCM-compatible XML files.  Supports loading
 team/cyclist data from CSV database folders or from an opened CDB file.
+
+Two tabs:
+    - Singleplayer: HTML -> XML conversion with ID matching
+    - Multiplayer:  HTML + CDB -> modified CDB with non-startlist riders
+                    on participating teams moved to team 119
 """
 
 import gc
@@ -12,7 +17,10 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 import core.converter as converter
-from core.startlist import StartlistDatabase, StartlistParser, PCMXmlWriter
+from core.startlist import (
+    StartlistDatabase, StartlistParser, PCMXmlWriter,
+    apply_multiplayer_startlist,
+)
 from ui.ui_utils import run_async
 
 # databases/ folder next to main.py
@@ -40,6 +48,10 @@ class StartlistView:
         self.db = None
         self.temp_path = None
 
+        # Multiplayer state
+        self.mp_db = None
+        self.mp_temp_path = None
+
         self._build_ui()
         self._load_selected_db()
 
@@ -52,12 +64,31 @@ class StartlistView:
             toolbar, text="Home", command=self._on_home, width=10,
         ).pack(side=tk.LEFT, padx=5)
 
-        # Content area
+        # Shared content area
         content = tk.Frame(self.frame, padx=16, pady=12)
         content.pack(fill='both', expand=True)
 
+        # Notebook (tabs)
+        self.notebook = ttk.Notebook(content)
+        self.notebook.pack(fill='both', expand=True)
+
+        self._build_singleplayer_tab()
+        self._build_multiplayer_tab()
+
+        # Status bar
+        self.status = tk.Label(
+            self.frame, text="Ready", bd=1, relief="sunken", anchor="w",
+        )
+        self.status.pack(side=tk.BOTTOM, fill=tk.X)
+
+    # -- Tab builders -------------------------------------------------------
+
+    def _build_singleplayer_tab(self):
+        tab = tk.Frame(self.notebook, padx=8, pady=8)
+        self.notebook.add(tab, text="Singleplayer")
+
         # Database section
-        db_frame = tk.LabelFrame(content, text="Database", padx=8, pady=8)
+        db_frame = tk.LabelFrame(tab, text="Database", padx=8, pady=8)
         db_frame.pack(fill='x', pady=(0, 8))
         db_row = tk.Frame(db_frame)
         db_row.pack(fill='x')
@@ -78,7 +109,8 @@ class StartlistView:
             state='readonly', width=30,
         )
         self.db_combo.pack(side='left', padx=(6, 0))
-        self.db_combo.bind('<<ComboboxSelected>>', lambda e: self._load_selected_db())
+        self.db_combo.bind(
+            '<<ComboboxSelected>>', lambda e: self._load_selected_db())
 
         if self._db_names:
             self.db_combo.current(0)
@@ -94,7 +126,7 @@ class StartlistView:
         self.db_status.pack(fill='x', pady=(4, 0))
 
         # HTML file input
-        file_frame = tk.LabelFrame(content, text="HTML startlist file",
+        file_frame = tk.LabelFrame(tab, text="HTML startlist file",
                                    padx=8, pady=8)
         file_frame.pack(fill='x', pady=(0, 8))
         row = tk.Frame(file_frame)
@@ -107,7 +139,7 @@ class StartlistView:
             side='left', padx=(6, 0))
 
         # Output file
-        out_frame = tk.LabelFrame(content, text="Output XML file",
+        out_frame = tk.LabelFrame(tab, text="Output XML file",
                                   padx=8, pady=8)
         out_frame.pack(fill='x', pady=(0, 8))
         out_row = tk.Frame(out_frame)
@@ -120,7 +152,7 @@ class StartlistView:
                   command=self._browse_output).pack(side='left', padx=(6, 0))
 
         # Convert button
-        btn_frame = tk.Frame(content)
+        btn_frame = tk.Frame(tab)
         btn_frame.pack(fill='x', pady=(0, 8))
         tk.Button(
             btn_frame, text="Convert", command=self._convert,
@@ -130,24 +162,89 @@ class StartlistView:
         # Progress bar
         self.progress_var = tk.DoubleVar()
         ttk.Progressbar(
-            content, variable=self.progress_var, maximum=100,
+            tab, variable=self.progress_var, maximum=100,
         ).pack(fill='x', pady=(0, 4))
 
         # Log area
-        tk.Label(content, text="Log:", font=("Segoe UI", 9)).pack(anchor='w')
+        tk.Label(tab, text="Log:", font=("Segoe UI", 9)).pack(anchor='w')
         self.log_widget = scrolledtext.ScrolledText(
-            content, height=14, state='disabled',
+            tab, height=14, state='disabled',
             font=("Consolas", 9), bg="#1e1e1e", fg="#cccccc",
         )
         self.log_widget.pack(fill='both', expand=True, pady=(2, 0))
 
-        # Status bar
-        self.status = tk.Label(
-            self.frame, text="Ready", bd=1, relief="sunken", anchor="w",
-        )
-        self.status.pack(side=tk.BOTTOM, fill=tk.X)
+    def _build_multiplayer_tab(self):
+        tab = tk.Frame(self.notebook, padx=8, pady=8)
+        self.notebook.add(tab, text="Multiplayer")
 
-    # -- Database loading ---------------------------------------------------
+        # CDB file input
+        cdb_frame = tk.LabelFrame(tab, text="CDB database file", padx=8, pady=8)
+        cdb_frame.pack(fill='x', pady=(0, 8))
+        cdb_row = tk.Frame(cdb_frame)
+        cdb_row.pack(fill='x')
+
+        self.mp_cdb_var = tk.StringVar()
+        tk.Entry(cdb_row, textvariable=self.mp_cdb_var, width=60,
+                 state='readonly').pack(side='left', fill='x', expand=True)
+        tk.Button(cdb_row, text="Open CDB...",
+                  command=self._mp_browse_cdb).pack(side='left', padx=(6, 0))
+
+        self.mp_cdb_status = tk.Label(
+            cdb_frame, text="No CDB loaded", fg="#888",
+            font=("Segoe UI", 9), anchor='w',
+        )
+        self.mp_cdb_status.pack(fill='x', pady=(4, 0))
+
+        # HTML startlist input
+        html_frame = tk.LabelFrame(tab, text="HTML startlist file",
+                                   padx=8, pady=8)
+        html_frame.pack(fill='x', pady=(0, 8))
+        html_row = tk.Frame(html_frame)
+        html_row.pack(fill='x')
+
+        self.mp_html_var = tk.StringVar()
+        tk.Entry(html_row, textvariable=self.mp_html_var, width=60).pack(
+            side='left', fill='x', expand=True)
+        tk.Button(html_row, text="Browse...",
+                  command=self._mp_browse_html).pack(side='left', padx=(6, 0))
+
+        # Output CDB file
+        out_frame = tk.LabelFrame(tab, text="Output CDB file", padx=8, pady=8)
+        out_frame.pack(fill='x', pady=(0, 8))
+        out_row = tk.Frame(out_frame)
+        out_row.pack(fill='x')
+
+        self.mp_out_var = tk.StringVar()
+        tk.Entry(out_row, textvariable=self.mp_out_var, width=60).pack(
+            side='left', fill='x', expand=True)
+        tk.Button(out_row, text="Save as...",
+                  command=self._mp_browse_output).pack(side='left', padx=(6, 0))
+
+        # Process button
+        btn_frame = tk.Frame(tab)
+        btn_frame.pack(fill='x', pady=(0, 8))
+        tk.Button(
+            btn_frame, text="Process", command=self._mp_process,
+            bg="#2e8b57", fg="white", width=14,
+        ).pack(side='left')
+
+        # Progress bar
+        self.mp_progress_var = tk.DoubleVar()
+        ttk.Progressbar(
+            tab, variable=self.mp_progress_var, maximum=100,
+        ).pack(fill='x', pady=(0, 4))
+
+        # Log area
+        tk.Label(tab, text="Log:", font=("Segoe UI", 9)).pack(anchor='w')
+        self.mp_log_widget = scrolledtext.ScrolledText(
+            tab, height=14, state='disabled',
+            font=("Consolas", 9), bg="#1e1e1e", fg="#cccccc",
+        )
+        self.mp_log_widget.pack(fill='both', expand=True, pady=(2, 0))
+
+    # ======================================================================
+    # Singleplayer: Database loading
+    # ======================================================================
 
     def _load_selected_db(self):
         """Load database from the selected CSV folder."""
@@ -202,15 +299,9 @@ class StartlistView:
 
         run_async(self.root, task, on_success, "Loading CDB...")
 
-    # -- Navigation ---------------------------------------------------------
-
-    def _on_home(self):
-        self.temp_path = None
-        self.db = None
-        gc.collect()
-        self.go_home()
-
-    # -- Logging helpers ----------------------------------------------------
+    # ======================================================================
+    # Singleplayer: Logging helpers
+    # ======================================================================
 
     def _log(self, msg):
         self.log_widget.config(state='normal')
@@ -229,7 +320,9 @@ class StartlistView:
         self.progress_var.set((current / total) * 100 if total else 0)
         self.root.update_idletasks()
 
-    # -- File dialogs -------------------------------------------------------
+    # ======================================================================
+    # Singleplayer: File dialogs
+    # ======================================================================
 
     def _browse_file(self):
         path = filedialog.askopenfilename(
@@ -248,7 +341,9 @@ class StartlistView:
         if path:
             self.out_var.set(path)
 
-    # -- Conversion ---------------------------------------------------------
+    # ======================================================================
+    # Singleplayer: Conversion
+    # ======================================================================
 
     def _convert(self):
         filepath = self.file_var.get().strip()
@@ -296,3 +391,213 @@ class StartlistView:
                 "Could not parse any startlist data.\n"
                 "Make sure the file contains a valid startlist.",
             )
+
+    # ======================================================================
+    # Multiplayer: File dialogs
+    # ======================================================================
+
+    def _mp_browse_cdb(self):
+        path = filedialog.askopenfilename(
+            title="Select CDB database file",
+            filetypes=[("CDB files", "*.cdb")],
+        )
+        if not path:
+            return
+        self.mp_cdb_var.set(path)
+        self._mp_load_cdb(path)
+
+    def _mp_load_cdb(self, path):
+        """Convert CDB to SQLite and load for matching."""
+        def task():
+            gc.collect()
+            return converter.export_cdb_to_sqlite(path)
+
+        def on_success(temp_path):
+            self.mp_temp_path = temp_path
+            self.mp_db = StartlistDatabase.from_sqlite(temp_path)
+            if self.mp_db.loaded:
+                msg = (f"CDB loaded: {len(self.mp_db.teams)} teams, "
+                       f"{len(self.mp_db.cyclists)} cyclists")
+                self.mp_cdb_status.config(text=msg, fg="#333")
+                self._mp_log(msg)
+            else:
+                self.mp_cdb_status.config(
+                    text="WARNING: DYN_team or DYN_cyclist tables missing",
+                    fg="#c00")
+                self._mp_log("WARNING: tables missing in CDB.")
+
+        run_async(self.root, task, on_success, "Loading CDB...")
+
+    def _mp_browse_html(self):
+        path = filedialog.askopenfilename(
+            title="Select HTML startlist file",
+            filetypes=[("HTML files", "*.html *.htm"), ("All files", "*.*")],
+        )
+        if path:
+            self.mp_html_var.set(path)
+
+    def _mp_browse_output(self):
+        path = filedialog.asksaveasfilename(
+            title="Save modified CDB as",
+            defaultextension=".cdb",
+            filetypes=[("CDB files", "*.cdb"), ("All files", "*.*")],
+        )
+        if path:
+            self.mp_out_var.set(path)
+
+    # ======================================================================
+    # Multiplayer: Logging helpers
+    # ======================================================================
+
+    def _mp_log(self, msg):
+        self.mp_log_widget.config(state='normal')
+        self.mp_log_widget.insert('end', msg + "\n")
+        self.mp_log_widget.see('end')
+        self.mp_log_widget.config(state='disabled')
+        self.root.update_idletasks()
+
+    def _mp_clear_log(self):
+        self.mp_log_widget.config(state='normal')
+        self.mp_log_widget.delete('1.0', 'end')
+        self.mp_log_widget.config(state='disabled')
+        self.mp_progress_var.set(0)
+
+    def _mp_update_progress(self, current, total):
+        self.mp_progress_var.set((current / total) * 100 if total else 0)
+        self.root.update_idletasks()
+
+    # ======================================================================
+    # Multiplayer: Processing
+    # ======================================================================
+
+    def _mp_process(self):
+        # Validate inputs
+        if not self.mp_db or not self.mp_db.loaded:
+            messagebox.showwarning("No CDB", "Please load a CDB file first.")
+            return
+
+        html_path = self.mp_html_var.get().strip()
+        if not html_path:
+            messagebox.showwarning("No startlist",
+                                   "Please select an HTML startlist file.")
+            return
+
+        output = self.mp_out_var.get().strip()
+        if not output:
+            messagebox.showwarning("No output",
+                                   "Please set an output CDB file path.")
+            return
+
+        # Warn user to back up their CDB
+        proceed = messagebox.askokcancel(
+            "Backup reminder",
+            "Make sure you have a backup of your CDB file before proceeding.\n\n"
+            "This will create a modified CDB where non-startlist riders on "
+            "participating teams are moved to the free agent pool (team 119) "
+            "and their contracts are removed.\n\n"
+            "Continue?",
+        )
+        if not proceed:
+            return
+
+        self._mp_clear_log()
+        self._mp_log(f"Reading startlist: {html_path}")
+
+        # 1. Parse HTML
+        data = self.parser.parse_file(html_path)
+        if not data:
+            self._mp_log("ERROR: Could not parse startlist data.")
+            messagebox.showerror("Error", "Could not parse startlist data.")
+            return
+
+        total_teams = len(data)
+        total_riders = sum(len(r) for r in data.values())
+        self._mp_log(f"Parsed {total_teams} teams, {total_riders} riders\n")
+
+        # 2. Match teams and riders
+        matched_team_ids = set()
+        matched_rider_ids = set()
+        unmatched_teams = []
+        unmatched_riders = []
+        processed = 0
+
+        for team_name, riders in data.items():
+            team_id, _ = self.mp_db.match_team(team_name)
+            if team_id:
+                matched_team_ids.add(str(team_id))
+                self._mp_log(f"  [TEAM]  {team_name} -> ID {team_id}")
+            else:
+                unmatched_teams.append(team_name)
+                self._mp_log(f"  [TEAM]  {team_name} -> NOT FOUND")
+
+            for rider_name in riders:
+                rider_id, matched = self.mp_db.match_rider(
+                    rider_name, team_id)
+                if rider_id:
+                    matched_rider_ids.add(str(rider_id))
+                    self._mp_log(
+                        f"    [RIDER] {rider_name} -> ID {rider_id}")
+                else:
+                    unmatched_riders.append(rider_name)
+                    self._mp_log(
+                        f"    [RIDER] {rider_name} -> NOT FOUND")
+
+                processed += 1
+                self._mp_update_progress(processed, total_riders)
+
+        self._mp_log(f"\nMatched {len(matched_team_ids)} teams, "
+                     f"{len(matched_rider_ids)} riders")
+
+        if unmatched_teams:
+            self._mp_log(f"[!] {len(unmatched_teams)} team(s) not matched")
+        if unmatched_riders:
+            self._mp_log(f"[!] {len(unmatched_riders)} rider(s) not matched")
+
+        if not matched_team_ids:
+            self._mp_log("ERROR: No teams matched. Cannot proceed.")
+            messagebox.showerror("Error", "No teams matched the database.")
+            return
+
+        # 3. Modify database: move non-startlist riders to team 119
+        self._mp_log("\nMoving non-startlist riders to team 119...")
+
+        working_path, moved, contracts = apply_multiplayer_startlist(
+            self.mp_temp_path, matched_team_ids, matched_rider_ids,
+        )
+        self._mp_log(f"Moved {moved} rider(s) to team 119")
+        self._mp_log(f"Removed {contracts} contract(s)")
+
+        # 4. Export to CDB
+        self._mp_log(f"Saving to: {output}")
+
+        def task():
+            return converter.import_sqlite_to_cdb(working_path, output)
+
+        def on_success(_result):
+            self.mp_progress_var.set(100)
+            self._mp_log(f"\nDone! Saved to: {output}")
+            self.status.config(
+                text=f"Saved {output}  --  {len(matched_rider_ids)} on "
+                     f"startlist, {moved} moved to team 119"
+            )
+            messagebox.showinfo(
+                "Success",
+                f"Multiplayer CDB saved to:\n{output}\n\n"
+                f"Teams on startlist: {len(matched_team_ids)}\n"
+                f"Riders on startlist: {len(matched_rider_ids)}\n"
+                f"Riders moved to team 119: {moved}",
+            )
+
+        run_async(self.root, task, on_success, "Saving CDB...")
+
+    # ======================================================================
+    # Navigation
+    # ======================================================================
+
+    def _on_home(self):
+        self.temp_path = None
+        self.db = None
+        self.mp_temp_path = None
+        self.mp_db = None
+        gc.collect()
+        self.go_home()
