@@ -8,7 +8,10 @@ with support for inline editing, sorting, searching, and column visibility.
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from core.constants import PAGE_SIZE, DEFAULT_COLUMN_WIDTH, RESIZE_SAVE_DELAY
+from core.constants import (
+    ROW_CHUNK_SIZE, COL_CHUNK_SIZE, DEFAULT_COLUMN_WIDTH,
+    RESIZE_SAVE_DELAY, DEFAULT_WINDOW_WIDTH,
+)
 
 
 class TableView:
@@ -16,7 +19,7 @@ class TableView:
     Treeview-based table editor with pagination and inline editing.
 
     Features:
-        - Paginated data loading (50 rows per page)
+        - Paginated data loading with prev/next page navigation
         - Inline cell editing with Tab/Arrow navigation
         - Column sorting (click headers)
         - Right-click context menu for row operations
@@ -47,13 +50,15 @@ class TableView:
         self.active_editor = None
         self.editing_data = {}
         self.sort_state = {"column": None, "reverse": False}
-        self.page_size = PAGE_SIZE
+        self.page_size = ROW_CHUNK_SIZE
         self.offset = 0
         self.total_rows = 0
         self.loading_data = False
         self.last_saved_widths = {}
         self._resize_timer = None
         self.all_columns = []
+        self._configured_columns = []
+        self._col_window_end = 0
 
         self._setup_ui()
         self._create_menu()
@@ -64,12 +69,12 @@ class TableView:
         self.tree.tag_configure('evenrow', background="#ffffff")
 
         self.vsb = ttk.Scrollbar(self.parent, command=self.tree.yview)
-        hsb = ttk.Scrollbar(self.parent, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=self.on_tree_scroll, xscrollcommand=hsb.set)
+        self.hsb = ttk.Scrollbar(self.parent, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=self.on_tree_scroll, xscrollcommand=self.on_h_scroll)
 
         self.tree.grid(row=0, column=0, sticky='nsew')
         self.vsb.grid(row=0, column=1, sticky='ns')
-        hsb.grid(row=1, column=0, sticky='ew')
+        self.hsb.grid(row=1, column=0, sticky='ew')
         self.parent.grid_columnconfigure(0, weight=1)
         self.parent.grid_rowconfigure(0, weight=1)
 
@@ -97,6 +102,8 @@ class TableView:
         """Set database manager instance."""
         self.db = db
         self.current_table = None
+        self._configured_columns = []
+        self._col_window_end = 0
         self.tree.delete(*self.tree.get_children())
         self.tree["columns"] = []
 
@@ -104,6 +111,8 @@ class TableView:
         """Switch to viewing a different table."""
         self.current_table = table_name
         self.sort_state = {"column": None, "reverse": False}
+        self._configured_columns = []
+        self._col_window_end = 0
         self.load_table_data()
 
     def set_search_term(self, term):
@@ -112,6 +121,8 @@ class TableView:
 
     def set_lookup_mode(self, enabled):
         self.lookup_mode = enabled
+        self._configured_columns = []
+        self._col_window_end = 0
         self.load_table_data()
 
     # ------------------------------------------------------------------
@@ -149,14 +160,32 @@ class TableView:
         if float(last) > 0.95:
             self.load_more_data()
 
+    def on_h_scroll(self, first, last):
+        """Handle horizontal scroll — load more columns near right edge."""
+        self.hsb.set(first, last)
+        if float(last) > 0.9 and self._col_window_end < len(self._configured_columns):
+            self._load_more_columns()
+
     def sort_column(self, col, reverse):
         """Sort table by column."""
         self.sort_state = {"column": col, "reverse": reverse}
         self.load_table_data()
 
+    def _compute_col_window(self, total_cols):
+        """Compute how many columns to show in the initial window.
+
+        Returns:
+            int: Number of columns for the display window.
+        """
+        tree_width = self.tree.winfo_width()
+        if tree_width < 100:
+            tree_width = DEFAULT_WINDOW_WIDTH
+        visible_count = tree_width // DEFAULT_COLUMN_WIDTH
+        return min(visible_count + COL_CHUNK_SIZE, total_cols)
+
     def load_table_data(self, start_offset=0):
         """
-        Load and display table data with pagination.
+        Load and display table data with infinite scroll on rows and columns.
 
         Args:
             start_offset (int): Row offset for pagination (default: 0)
@@ -189,16 +218,26 @@ class TableView:
         # Filter to visible columns
         display_columns, _, filtered_rows = self._filter_visible(columns, row_data)
 
+        # Reset displaycolumns before changing columns to avoid TclError
+        self.tree["displaycolumns"] = "#all"
         self.tree["columns"] = display_columns
+        self._configured_columns = list(display_columns)
 
-        # Configure column headings and widths
+        # Compute column window — only configure/show a subset initially
+        self._col_window_end = self._compute_col_window(len(display_columns))
+        window_cols = display_columns[:self._col_window_end]
+
+        if self._col_window_end < len(display_columns):
+            self.tree["displaycolumns"] = window_cols
+
+        # Configure column headings and widths for window columns
         saved_widths = self.state.get_column_widths(self.current_table) if self.current_table else None
         current_widths = {}
 
-        for col in display_columns:
+        for col in window_cols:
             prefix = ""
             if col == self.sort_state["column"]:
-                prefix = "▼ " if self.sort_state["reverse"] else "▲ "
+                prefix = "\u25bc " if self.sort_state["reverse"] else "\u25b2 "
             self.tree.heading(
                 col, text=prefix + col,
                 command=lambda _c=col: self.sort_column(
@@ -240,6 +279,42 @@ class TableView:
         self.offset += len(row_data)
         self.loading_data = False
 
+    def _load_more_columns(self):
+        """Expand the column display window when scrolling right."""
+        if not self._configured_columns or self._col_window_end >= len(self._configured_columns):
+            return
+
+        old_end = self._col_window_end
+        chunk = self._compute_col_window(len(self._configured_columns))
+        new_end = min(old_end + chunk, len(self._configured_columns))
+        if new_end == old_end:
+            return
+
+        self._col_window_end = new_end
+
+        # Configure widths and headings for newly added columns
+        saved_widths = self.state.get_column_widths(self.current_table) if self.current_table else None
+        for col in self._configured_columns[old_end:new_end]:
+            prefix = ""
+            if col == self.sort_state["column"]:
+                prefix = "\u25bc " if self.sort_state["reverse"] else "\u25b2 "
+            self.tree.heading(
+                col, text=prefix + col,
+                command=lambda _c=col: self.sort_column(
+                    _c,
+                    not self.sort_state["reverse"] if _c == self.sort_state["column"] else False,
+                ),
+            )
+            width = saved_widths.get(col, DEFAULT_COLUMN_WIDTH) if saved_widths else DEFAULT_COLUMN_WIDTH
+            self.tree.column(col, width=width, stretch=False)
+            self.last_saved_widths[col] = width
+
+        # Expand display window (no row re-insertion needed)
+        if self._col_window_end >= len(self._configured_columns):
+            self.tree["displaycolumns"] = "#all"
+        else:
+            self.tree["displaycolumns"] = self._configured_columns[:new_end]
+
     # ------------------------------------------------------------------
     # Click handlers
     # ------------------------------------------------------------------
@@ -270,11 +345,11 @@ class TableView:
 
     def on_column_resize(self, event):
         """Save column widths when user resizes a column (debounced)."""
-        if not self.current_table or not self.tree["columns"]:
+        if not self.current_table or not self._configured_columns:
             return
 
         widths = {}
-        for col in self.tree["columns"]:
+        for col in self._configured_columns[:self._col_window_end]:
             widths[col] = self.tree.column(col, "width")
 
         if widths != self.last_saved_widths:

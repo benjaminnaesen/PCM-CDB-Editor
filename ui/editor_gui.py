@@ -104,7 +104,7 @@ class PCMDatabaseTools:
         toolbar = tk.Frame(self.editor_frame, pady=10, bg="#f0f0f0")
         toolbar.pack(side=tk.TOP, fill=tk.X)
 
-        tk.Button(toolbar, text="\u2190 Close CDB", command=self.close_cdb, bg="#b0b0b0").pack(side=tk.LEFT, padx=5)
+        tk.Button(toolbar, text="\u2190 Close CDB", command=self.close_cdb).pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Open CDB", command=self.load_cdb, width=10).pack(side=tk.LEFT, padx=5)
         tk.Button(toolbar, text="Save As...", command=self.save_as_cdb, width=10).pack(side=tk.LEFT, padx=5)
 
@@ -160,8 +160,14 @@ class PCMDatabaseTools:
         self.pw.add(self.table_frame)
         self.table_view = TableView(self.table_frame, self.state, self.on_data_change)
 
-        self.status = tk.Label(self.editor_frame, text="Ready", bd=1, relief="sunken", anchor="w")
-        self.status.pack(side=tk.BOTTOM, fill=tk.X)
+        status_bar = tk.Frame(self.editor_frame, bd=1, relief="sunken")
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.status = tk.Label(status_bar, text="Ready", anchor="w")
+        self.status.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.selection_label = tk.Label(status_bar, text="", anchor="e", padx=10)
+        self.selection_label.pack(side=tk.RIGHT)
+
+        self.table_view.tree.bind("<<TreeviewSelect>>", self._on_selection_change)
 
     # ==================================================================
     # Navigation
@@ -548,6 +554,10 @@ class PCMDatabaseTools:
         tk.Entry(frame, textvariable=var, width=width, relief="flat").pack(side="left", padx=5, fill="x", expand=True)
         tk.Button(frame, text="✕", command=lambda: var.set(""), relief="flat", bg="white", bd=0).pack(side="right")
         return frame
+
+    def _on_selection_change(self, event=None):
+        count = len(self.table_view.tree.selection())
+        self.selection_label.config(text=f"{count} row{'s' if count != 1 else ''} selected" if count else "")
 
     def on_table_select(self, table_name):
         self.search_var.set("")

@@ -29,11 +29,10 @@ class DatabaseManager:
             db_path (str): Path to the SQLite database file
         """
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
-        self.conn.execute("PRAGMA journal_mode=WAL")
         self.schema_cache = {}
         self.table_map_cache = None
         self._fk_options_cache = {}
+        self.conn = sqlite3.connect(db_path)
 
     def close(self):
         """Close the persistent database connection."""

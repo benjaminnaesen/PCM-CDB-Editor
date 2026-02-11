@@ -12,7 +12,7 @@ PCM Database Tools is a Tkinter desktop app for editing Pro Cycling Manager .cdb
 - `converter.py` — shells out to `SQLiteExporter.exe` for CDB↔SQLite
 - `csv_io.py` — CSV bulk import/export
 - `startlist.py` — `StartlistParser` (BeautifulSoup), `StartlistDatabase`, `PCMXmlWriter`
-- `constants.py` — all magic numbers (`PAGE_SIZE`, `DB_CHUNK_SIZE`, delays, limits)
+- `constants.py` — all magic numbers (`ROW_CHUNK_SIZE`, `COL_CHUNK_SIZE`, `DB_CHUNK_SIZE`, delays, limits)
 
 **UI layer** (`ui/`) — Tkinter widgets:
 - `editor_gui.py` — `PCMDatabaseTools` is the root window; manages frame navigation (home ↔ editor ↔ startlist) via `pack`/`pack_forget`
@@ -28,7 +28,7 @@ PCM Database Tools is a Tkinter desktop app for editing Pro Cycling Manager .cdb
 - FK columns use naming convention `fkID{Suffix}` mapping to tables `DYN_{Suffix}`, `STA_{Suffix}`, or `GAM_{Suffix}`
 - Display columns for FK lookups are chosen by preference list: `gene_sz_name`, `name`, `szName`, `sz_name`, then first text column
 - `run_async()` runs blocking operations in daemon threads with a modal progress dialog
-- Pagination: `PAGE_SIZE` rows loaded initially, more on scroll via `load_more_data()`
+- Pagination: `ROW_CHUNK_SIZE` rows loaded initially, more on scroll via `load_more_data()`
 - Search is debounced (`SEARCH_DEBOUNCE_DELAY` ms) and runs SQL `CAST(col AS TEXT) LIKE ?`
 
 ## Testing

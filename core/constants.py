@@ -6,7 +6,8 @@ used throughout the application, centralized for easy maintenance.
 """
 
 # Pagination settings
-PAGE_SIZE = 200  # Number of rows per page in table view
+ROW_CHUNK_SIZE = 50  # Number of rows loaded per scroll chunk
+COL_CHUNK_SIZE = 15  # Number of columns loaded per scroll chunk
 
 # Database operations
 DB_CHUNK_SIZE = 900  # SQLite parameter limit safety margin for bulk operations
