@@ -144,22 +144,49 @@ class DatabaseManager:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_search_clause(table_name, columns, search_term):
+    def _build_search_clause(search_fields, search_term):
         """Build a WHERE clause for searching across all columns.
 
         Args:
-            table_name (str): Name of the table (for qualifying column names)
-            columns (list[str]): Column names to search
+            search_fields (list[str]): SQL expressions to search (e.g.
+                ``["[table].[col]", "[_fk1].[name]"]``).
             search_term (str): Term to search for
 
         Returns:
             tuple: (where_sql, params)
         """
         where_sql = " OR ".join(
-            f"CAST([{table_name}].[{col}] AS TEXT) LIKE ?" for col in columns
+            f"CAST({field} AS TEXT) LIKE ?" for field in search_fields
         )
-        params = [f"%{search_term}%"] * len(columns)
+        params = [f"%{search_term}%"] * len(search_fields)
         return where_sql, params
+
+    def _build_lookup_joins(self, cursor, table_name, columns):
+        """Build SELECT fields and JOINs for FK lookup mode.
+
+        Returns:
+            tuple: (select_fields, joins) where select_fields[i] is the
+            SQL expression for column i and joins is a list of JOIN clauses.
+        """
+        self._ensure_table_map(cursor)
+        select_fields = [f"[{table_name}].[{c}]" for c in columns]
+        joins = []
+        for i, col in enumerate(columns):
+            if col.startswith("fkID") and len(col) > 4:
+                target_table = self._resolve_fk_target(col[4:])
+                if target_table:
+                    try:
+                        pk, display = self._resolve_fk_display(cursor, target_table)
+                        if display:
+                            alias = f"_fk{i}"
+                            select_fields[i] = f"[{alias}].[{display}]"
+                            joins.append(
+                                f"LEFT JOIN [{target_table}] [{alias}] "
+                                f"ON [{alias}].[{pk}] = [{table_name}].[{col}]"
+                            )
+                    except Exception:
+                        pass
+        return select_fields, joins
 
     # ------------------------------------------------------------------
     # Data fetching
@@ -189,22 +216,8 @@ class DatabaseManager:
         joins = []
 
         if lookup:
-            self._ensure_table_map(cursor)
-            for i, col in enumerate(columns):
-                if col.startswith("fkID") and len(col) > 4:
-                    target_table = self._resolve_fk_target(col[4:])
-                    if target_table:
-                        try:
-                            pk, display = self._resolve_fk_display(cursor, target_table)
-                            if display:
-                                alias = f"_fk{i}"
-                                select_fields[i] = f"[{alias}].[{display}]"
-                                joins.append(
-                                    f"LEFT JOIN [{target_table}] [{alias}] "
-                                    f"ON [{alias}].[{pk}] = [{table_name}].[{col}]"
-                                )
-                        except Exception:
-                            pass
+            select_fields, joins = self._build_lookup_joins(
+                cursor, table_name, columns)
 
         query_cols = ", ".join(select_fields)
         join_clause = " ".join(joins)
@@ -212,7 +225,8 @@ class DatabaseManager:
         params = []
 
         if search_term:
-            where_sql, params = self._build_search_clause(table_name, columns, search_term)
+            where_sql, params = self._build_search_clause(
+                select_fields, search_term)
             sql += f" WHERE {where_sql}"
 
         if sort_col:
@@ -224,13 +238,14 @@ class DatabaseManager:
         cursor.execute(sql, params)
         return columns, cursor.fetchall()
 
-    def get_row_count(self, table_name, search_term=None):
+    def get_row_count(self, table_name, search_term=None, lookup=False):
         """
         Get total number of rows in a table, optionally filtered by search term.
 
         Args:
             table_name (str): Name of the table
             search_term (str, optional): Search term to filter across all columns.
+            lookup (bool, optional): If True, search FK display values too.
 
         Returns:
             int: Number of rows matching the criteria
@@ -238,9 +253,16 @@ class DatabaseManager:
         cursor = self.conn.cursor()
         if search_term:
             columns = self.get_columns(table_name)
-            where_sql, params = self._build_search_clause(table_name, columns, search_term)
+            search_fields = [f"[{table_name}].[{c}]" for c in columns]
+            joins = []
+            if lookup:
+                search_fields, joins = self._build_lookup_joins(
+                    cursor, table_name, columns)
+            join_clause = " ".join(joins)
+            where_sql, params = self._build_search_clause(
+                search_fields, search_term)
             cursor.execute(
-                f"SELECT COUNT(*) FROM [{table_name}] WHERE {where_sql}",
+                f"SELECT COUNT(*) FROM [{table_name}] {join_clause} WHERE {where_sql}",
                 params,
             )
         else:

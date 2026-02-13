@@ -197,7 +197,7 @@ class TableView:
 
         self.tree.grid_remove()
         self.offset = start_offset
-        self.total_rows = self.db.get_row_count(self.current_table, self.search_term)
+        self.total_rows = self.db.get_row_count(self.current_table, self.search_term, self.lookup_mode)
 
         # Set default sort to first column (primary key) if not set
         if self.sort_state["column"] is None:
@@ -432,7 +432,7 @@ class TableView:
                     next_col_index = 1
         elif event.keysym == 'Up' and (p := self.tree.prev(item)):
             next_item = p
-        elif event.keysym == 'Down' and (n := self.tree.next(item)):
+        elif event.keysym in ('Down', 'Return') and (n := self.tree.next(item)):
             next_item = n
 
         self.tree.selection_set(next_item)
@@ -477,7 +477,7 @@ class TableView:
         }
 
         bindings = {
-            "<Return>": lambda e: self.commit_editor(),
+            "<Return>": self.on_editor_navigate,
             "<FocusOut>": lambda e: self.commit_editor(),
             "<Escape>": self.cancel_edit,
             "<Tab>": self.on_editor_navigate,
@@ -519,7 +519,7 @@ class TableView:
             if not self.sort_state["column"] or (
                 self.sort_state["column"] == self.all_columns[0] and not self.sort_state["reverse"]
             ):
-                total_rows = self.db.get_row_count(self.current_table, self.search_term)
+                total_rows = self.db.get_row_count(self.current_table, self.search_term, self.lookup_mode)
                 if total_rows > self.page_size:
                     start_offset = total_rows - self.page_size
 
@@ -581,7 +581,7 @@ class TableView:
                 if not self.sort_state["column"] or (
                     self.sort_state["column"] == pk_col and not self.sort_state["reverse"]
                 ):
-                    total_rows = self.db.get_row_count(self.current_table, self.search_term)
+                    total_rows = self.db.get_row_count(self.current_table, self.search_term, self.lookup_mode)
                     if total_rows > self.page_size:
                         start_offset = total_rows - self.page_size
 
