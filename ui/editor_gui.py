@@ -64,6 +64,7 @@ class PCMDatabaseTools:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def track_window_size(self, event):
+        """Track normal (non-maximized) window geometry for session persistence."""
         try:
             if sys.platform.startswith('win'):
                 is_maximized = self.root.state() == 'zoomed'
@@ -192,6 +193,7 @@ class PCMDatabaseTools:
     # ==================================================================
 
     def on_search(self, *args):
+        """Debounced search handler — delays execution until typing stops."""
         if self.search_timer:
             self.root.after_cancel(self.search_timer)
         self.search_timer = self.root.after(SEARCH_DEBOUNCE_DELAY, self._execute_search)
@@ -201,6 +203,7 @@ class PCMDatabaseTools:
         self.search_timer = None
 
     def toggle_lookup(self):
+        """Toggle FK lookup mode between showing display names and raw IDs."""
         new_state = not self.lookup_var.get()
         self.lookup_var.set(new_state)
         self.lookup_btn.config(text="Lookup: ON" if new_state else "Lookup: OFF")
@@ -211,10 +214,12 @@ class PCMDatabaseTools:
     # ==================================================================
 
     def on_data_change(self):
+        """Mark the session as having unsaved changes and refresh undo/redo buttons."""
         self.unsaved_changes = True
         self._update_btns()
 
     def undo(self):
+        """Undo the last edit (cell change or row operation)."""
         action = self.state.undo()
         if not action:
             return
@@ -231,6 +236,7 @@ class PCMDatabaseTools:
         self._update_btns()
 
     def redo(self):
+        """Redo the last undone edit."""
         action = self.state.redo()
         if not action:
             return
@@ -247,6 +253,7 @@ class PCMDatabaseTools:
         self._update_btns()
 
     def _handle_row_op(self, action, is_undo):
+        """Apply or reverse a row insert/delete operation for undo/redo."""
         table = action["table"]
         mode = action["mode"]
         rows = action["rows"]
@@ -281,6 +288,7 @@ class PCMDatabaseTools:
     # ==================================================================
 
     def close_cdb(self):
+        """Close the current database and return to the home screen."""
         if self.unsaved_changes:
             if not messagebox.askyesno("Unsaved Changes", "You have unsaved changes. Are you sure you want to close?"):
                 return
@@ -295,6 +303,7 @@ class PCMDatabaseTools:
         self.show_home()
 
     def load_cdb(self, path=None):
+        """Open a CDB file, convert to SQLite, and show the editor view."""
         if not path:
             path = filedialog.askopenfilename(
                 initialdir=self.state.settings.get("last_path", ""),
@@ -328,6 +337,7 @@ class PCMDatabaseTools:
         run_async(self.root, task, on_success, "Opening CDB...")
 
     def save_as_cdb(self):
+        """Export the working SQLite database back to a CDB file."""
         path = filedialog.asksaveasfilename(
             defaultextension=".cdb",
             filetypes=[("CDB files", "*.cdb")],
@@ -404,6 +414,7 @@ class PCMDatabaseTools:
     # ==================================================================
 
     def export_csv(self):
+        """Export the current table to a CSV file."""
         if not self.db:
             return
         if not self.table_view.current_table:
@@ -424,6 +435,7 @@ class PCMDatabaseTools:
             )
 
     def import_csv_table(self):
+        """Overwrite the current table's data from a CSV file."""
         if not self.db:
             return
         if not self.table_view.current_table:
@@ -451,6 +463,7 @@ class PCMDatabaseTools:
             )
 
     def export_all_csv(self):
+        """Export all database tables as CSV files into a folder."""
         if not self.db:
             return
 
@@ -464,6 +477,7 @@ class PCMDatabaseTools:
             )
 
     def import_all_csv(self):
+        """Overwrite all matching tables from CSV files in a folder."""
         if not self.db:
             return
 
@@ -498,6 +512,7 @@ class PCMDatabaseTools:
         ColumnManagerDialog(self.root, self.table_view, self.state)
 
     def clear_table(self):
+        """Delete all rows from the current table (undoable)."""
         if not self.db or not self.table_view.current_table:
             messagebox.showwarning("No Table", "Please select a table first.")
             return
@@ -550,6 +565,7 @@ class PCMDatabaseTools:
     # ==================================================================
 
     def _create_search_box(self, parent, var, width):
+        """Create a search entry with a clear button, returns the container frame."""
         frame = tk.Frame(parent, bg="white", highlightbackground="#ccc", highlightthickness=1)
         tk.Entry(frame, textvariable=var, width=width, relief="flat").pack(side="left", padx=5, fill="x", expand=True)
         tk.Button(frame, text="✕", command=lambda: var.set(""), relief="flat", bg="white", bd=0).pack(side="right")
@@ -560,10 +576,12 @@ class PCMDatabaseTools:
         self.selection_label.config(text=f"{count} row{'s' if count != 1 else ''} selected" if count else "")
 
     def on_table_select(self, table_name):
+        """Handle sidebar table selection — clear search and load the table."""
         self.search_var.set("")
         self.table_view.set_table(table_name)
 
     def on_close(self):
+        """Save settings and close the application, prompting if unsaved."""
         if self.unsaved_changes:
             if not messagebox.askyesno("Unsaved Changes", "You have unsaved changes. Are you sure you want to exit?"):
                 return

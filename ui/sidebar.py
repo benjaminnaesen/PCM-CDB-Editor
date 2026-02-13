@@ -100,11 +100,13 @@ class Sidebar:
             self.fav_lb.insert("end", table)
 
     def on_select(self, widget):
+        """Handle selection in either the favorites or tables listbox."""
         selection = widget.curselection()
         if selection:
             self.on_table_select(widget.get(selection[0]))
 
     def show_menu(self, event, widget):
+        """Show right-click context menu to add/remove favorites."""
         widget.selection_clear(0, "end")
         index = widget.nearest(event.y)
         widget.selection_set(index)
@@ -118,6 +120,7 @@ class Sidebar:
         self.menu.post(event.x_root, event.y_root)
 
     def add_favorite(self):
+        """Add the selected table to the favorites list."""
         selection = self.listbox.curselection()
         if selection:
             name = self.listbox.get(selection[0])
@@ -126,6 +129,7 @@ class Sidebar:
                 self.refresh_favorites()
 
     def remove_favorite(self):
+        """Remove the selected table from the favorites list."""
         sel_fav = self.fav_lb.curselection()
         sel_list = self.listbox.curselection()
         name = self.fav_lb.get(sel_fav[0]) if sel_fav else self.listbox.get(sel_list[0]) if sel_list else None
@@ -134,9 +138,11 @@ class Sidebar:
             self.refresh_favorites()
 
     def on_fav_press(self, event):
+        """Record the drag start index for favorites reordering."""
         self.cur_fav_index = self.fav_lb.nearest(event.y)
 
     def on_fav_motion(self, event):
+        """Drag-and-drop reorder: move the dragged favorite to the hovered position."""
         i = self.fav_lb.nearest(event.y)
         if i < self.fav_lb.size() and i != self.cur_fav_index:
             text = self.fav_lb.get(self.cur_fav_index)

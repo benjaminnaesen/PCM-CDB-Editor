@@ -116,10 +116,12 @@ class TableView:
         self.load_table_data()
 
     def set_search_term(self, term):
+        """Update the search filter and reload the table."""
         self.search_term = term
         self.load_table_data()
 
     def set_lookup_mode(self, enabled):
+        """Toggle FK lookup mode and reload with display names or raw IDs."""
         self.lookup_mode = enabled
         self._configured_columns = []
         self._col_window_end = 0
@@ -156,6 +158,7 @@ class TableView:
     # ------------------------------------------------------------------
 
     def on_tree_scroll(self, first, last):
+        """Handle vertical scroll — load more rows near bottom edge."""
         self.vsb.set(first, last)
         if float(last) > 0.95:
             self.load_more_data()
@@ -366,12 +369,19 @@ class TableView:
     # ------------------------------------------------------------------
 
     def cancel_edit(self, event=None):
+        """Discard the active inline editor without saving changes."""
         if self.active_editor:
             self.active_editor.destroy()
             self.active_editor = None
             self.editing_data = {}
 
     def commit_editor(self, event=None, reload_data=True):
+        """Save the active editor value to the database and push an undo entry.
+
+        Args:
+            reload_data: If True, fully reload the table. If False, update
+                the Treeview row in-place (used during keyboard navigation).
+        """
         if not self.active_editor:
             return
         new_val = self.active_editor.get()
@@ -408,6 +418,12 @@ class TableView:
                 self.tree.item(data['item'], values=tuple(new_values))
 
     def on_editor_navigate(self, event):
+        """Handle Tab/Arrow/Enter navigation while the inline editor is open.
+
+        Commits the current edit and opens the editor in the adjacent cell.
+        Tab moves horizontally (wrapping to next/prev row), Arrow keys and
+        Enter move vertically.
+        """
         if not self.editing_data:
             return
         item = self.editing_data['item']
@@ -440,6 +456,11 @@ class TableView:
         return "break"
 
     def edit_cell(self, item, col_id):
+        """Open an inline editor (Entry or Combobox) on the given cell.
+
+        In lookup mode, FK columns get a Combobox with display names mapped
+        back to raw IDs on commit.
+        """
         if not item or not col_id:
             return
         index = int(col_id.replace('#', '')) - 1
@@ -641,6 +662,7 @@ class TableView:
     # ------------------------------------------------------------------
 
     def show_context_menu(self, event):
+        """Show right-click menu with Duplicate/Delete row actions."""
         row_id = self.tree.identify_row(event.y)
         if row_id:
             if row_id not in self.tree.selection():

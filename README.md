@@ -57,40 +57,168 @@ A desktop application bundling modding tools for Pro Cycling Manager (PCM), incl
 python main.py
 ```
 
-The home screen presents two tools: **Database Editor** and **Startlist Generator**, plus a list of recently opened CDB files.
+The home screen presents two tools: **Database Editor** and **Startlist Generator**, plus a list of recently opened CDB files. Click a recent file to jump straight into editing.
 
-### Database Editor Workflow
+---
 
-1. **Open a CDB File**: Click the Database Editor tile or select a recent file
-2. **Browse Tables**: Use the sidebar to navigate tables (search or filter)
-3. **Add Favorites**: Right-click tables to favorite them for quick access
-4. **Edit Data**: Double-click cells to edit values
-5. **Enable Lookup Mode**: Toggle to see human-readable names for foreign keys (e.g., team names instead of IDs)
-6. **Save Changes**: Click "Save As..." to export your modified database back to .cdb format
+### Database Editor
 
-### Startlist Generator Workflow
+#### Opening a Database
+
+1. Click the **Database Editor** tile on the home screen, or click a recent file
+2. Select a `.cdb` file from the file dialog
+3. The app converts it to SQLite internally and loads all tables
+
+#### Browsing Tables
+
+- The **sidebar** lists all tables in the database
+- Type in the sidebar search box to filter tables by name
+- **Favorites**: Right-click a table and select "Add to Favorites" to pin it at the top. Drag and drop to reorder favorites
+
+#### Editing Data
+
+- **Double-click** any cell (including ID columns) to start editing
+- **Enter**: Commit the edit and move to the cell below
+- **Tab / Shift+Tab**: Move to the next / previous cell
+- **Arrow Up / Down**: Move to the cell above / below
+- **Escape**: Cancel the edit
+- Type a new value and press Enter to save it to the database
+
+#### Lookup Mode
+
+Toggle **Lookup: ON/OFF** in the toolbar to switch between raw IDs and human-readable names for foreign key columns.
+
+- When **ON**: FK columns display resolved names (e.g. team names, rider names instead of numeric IDs). Searching also matches against these display names.
+- When **OFF**: FK columns display raw ID values
+- Single-click an FK cell in lookup mode to open a dropdown with all valid options
+
+#### Search
+
+The search box in the toolbar filters the current table in real-time:
+- Searches across **all columns** simultaneously
+- In lookup mode, also matches FK display values (e.g. search "Jumbo" to find riders by team name)
+- Clear the search with the X button
+
+#### Sorting
+
+- Click any **column header** to sort ascending
+- Click again to sort **descending**
+- Sorting persists until you switch tables
+
+#### Row Operations
+
+- **Add Row**: Click the "Add Row" button in the toolbar to insert a new row
+- **Duplicate Row**: Right-click a row (or multi-select rows) and choose "Duplicate Row"
+- **Delete Row**: Right-click and choose "Delete Row"
+- **Multi-select**: Hold Ctrl or Shift and click rows, or press Ctrl+A to select all
+
+#### Column Management
+
+- **Hide columns**: Right-click a column header and select "Hide Column"
+- **Manage columns**: Use the Tools menu > "Manage Columns" to open the column visibility dialog
+  - Check/uncheck columns to show or hide them
+  - Save column visibility configurations as **presets** for reuse
+  - Use "Show All" / "Hide All" for bulk toggling
+
+#### Undo / Redo
+
+- **Ctrl+Z**: Undo the last cell edit
+- **Ctrl+Y**: Redo
+- The undo/redo buttons in the toolbar also work
+
+#### CSV Import / Export
+
+From the **Tools** menu:
+- **Export Table to CSV**: Save the current table as a CSV file
+- **Import CSV to Table**: Load data from a CSV file into the current table
+- **Export All Tables**: Export every table in the database to individual CSV files in a folder
+- **Import All Tables**: Import CSVs from a folder, matching filenames to table names
+
+#### Saving Changes
+
+- Click **Save As...** in the toolbar to convert the modified SQLite database back to a `.cdb` file
+- The app will prompt for an output path -- you can overwrite the original or save to a new file
+- **Always keep a backup of your original `.cdb` file**
+
+---
+
+### Startlist Generator
+
+The startlist generator has two tabs: **Singleplayer** (HTML to XML) and **Multiplayer** (HTML + CDB to modified CDB).
+
+#### Singleplayer: HTML to XML Startlist
+
+Use this to generate a PCM-compatible XML startlist file from a saved HTML page.
+
+**Preparing the HTML file:**
+1. Go to the startlist page on [FirstCycling](https://firstcycling.com) or [ProCyclingStats](https://www.procyclingstats.com)
+2. Right-click anywhere on the page and select **"Save as..."** (or press Ctrl+S)
+3. In the save dialog, set "Save as type" to **"Webpage, HTML Only"**
+4. Save the `.html` file somewhere you can find it, then browse to it in the app
+
+**Step-by-step:**
 
 1. Click the **Startlist Generator** tile from the home screen
-2. **Select a database**: Choose a CSV database folder or open a CDB file for rider/team ID matching
-3. **Browse** for an HTML startlist file saved from FirstCycling or ProCyclingStats
-4. **Set output path** for the XML file
-5. Click **Convert** to generate the PCM-compatible startlist XML
+2. **Select a database** for ID matching:
+   - Pick a CSV database from the dropdown (databases stored in the `databases/` folder), OR
+   - Click **Open CDB...** to load a `.cdb` file directly
+3. The database status will confirm how many teams and cyclists were loaded
+4. Click **Browse...** to select an HTML startlist file saved from [FirstCycling](https://firstcycling.com) or [ProCyclingStats](https://www.procyclingstats.com)
+5. **Select a race** from the dropdown -- this determines the output XML filename. The race list is populated from the database's `STA_race` table
+6. Click **Generate Startlist**
+7. The log will show the matching progress: which teams and riders were matched to database IDs, and which were not found
+8. The output XML file is saved to the working directory
+
+#### Multiplayer: CDB Startlist Modification
+
+Use this to create a modified CDB where teams are trimmed to their race startlist. Non-startlist riders are moved to the free agent pool (team 119).
+
+**How it works:**
+- For teams **with riders in the HTML startlist**: keeps all matched riders.
+- Removed riders have their `fkIDteam` set to 119 (free agent) and their contracts deleted
+
+**Step-by-step:**
+
+1. Go to the **Multiplayer** tab in the Startlist Generator
+2. Click **Load CDB...** to select and convert your `.cdb` database
+3. Click **Browse...** to select the HTML startlist file
+4. Click **Save as...** to choose the output `.cdb` file path
+5. Click **Generate CDB Startlist**
+6. A backup reminder will appear -- make sure you have a copy of your original CDB
+7. The log shows the matching process:
+   - `[TEAM] Team Name -> ID 123` for matched teams
+   - `[RIDER] Rider Name -> ID 456` for matched riders
+   - `-> NOT FOUND` for unmatched entries
+8. After matching, the app modifies the database and exports the result as a new `.cdb` file
+9. A summary dialog shows how many riders were kept and how many were moved to team 119
+
+**Tip:** The output CDB is a new file -- your original database is never modified.
+
+---
 
 ### Keyboard Shortcuts
 
-- **Ctrl+Z**: Undo last edit
-- **Ctrl+Y**: Redo
-- **Tab**: Move to next cell while editing
-- **Shift+Tab**: Move to previous cell while editing
-- **Enter**: Confirm edit
-- **Escape**: Cancel edit
+| Shortcut | Action |
+|---|---|
+| **Ctrl+Z** | Undo last edit |
+| **Ctrl+Y** | Redo |
+| **Ctrl+A** | Select all rows |
+| **Double-click** | Edit cell |
+| **Enter** | Commit edit, move down |
+| **Tab** | Commit edit, move to next cell |
+| **Shift+Tab** | Commit edit, move to previous cell |
+| **Arrow Up/Down** | Commit edit, move up/down |
+| **Escape** | Cancel edit |
 
 ### File Formats
 
-- **.cdb**: Pro Cycling Manager database file (proprietary format)
-- **.sqlite**: SQLite database (used internally for editing)
-- **.csv**: Comma-separated values (for data import/export)
-- **.xml**: PCM startlist format (output of Startlist Generator)
+| Extension | Description |
+|---|---|
+| `.cdb` | Pro Cycling Manager database file (proprietary format) |
+| `.sqlite` | SQLite database (used internally during editing) |
+| `.csv` | Comma-separated values (for bulk data import/export) |
+| `.xml` | PCM startlist format (output of Singleplayer generator) |
+| `.html` | Saved web page from FirstCycling or ProCyclingStats (input for startlist generators) |
 
 The application automatically handles conversion between CDB and SQLite formats using the bundled SQLiteExporter.exe tool.
 

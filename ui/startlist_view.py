@@ -316,6 +316,7 @@ class StartlistView:
     # ======================================================================
 
     def _log(self, msg):
+        """Append a message to the singleplayer log widget."""
         self.log_widget.config(state='normal')
         self.log_widget.insert('end', msg + "\n")
         self.log_widget.see('end')
@@ -323,12 +324,14 @@ class StartlistView:
         self.root.update_idletasks()
 
     def _clear_log(self):
+        """Clear the singleplayer log and reset the progress bar."""
         self.log_widget.config(state='normal')
         self.log_widget.delete('1.0', 'end')
         self.log_widget.config(state='disabled')
         self.progress_var.set(0)
 
     def _update_progress(self, current, total):
+        """Update the singleplayer progress bar percentage."""
         self.progress_var.set((current / total) * 100 if total else 0)
         self.root.update_idletasks()
 
@@ -337,6 +340,7 @@ class StartlistView:
     # ======================================================================
 
     def _browse_file(self):
+        """Open a file dialog to select an HTML startlist file."""
         path = filedialog.askopenfilename(
             title="Select HTML startlist file",
             filetypes=[("HTML files", "*.html *.htm"), ("All files", "*.*")],
@@ -370,6 +374,7 @@ class StartlistView:
     # ======================================================================
 
     def _convert(self):
+        """Parse the HTML startlist, match IDs, and write the XML output file."""
         filepath = self.file_var.get().strip()
         if not filepath:
             messagebox.showwarning("No file",
@@ -425,6 +430,7 @@ class StartlistView:
     # ======================================================================
 
     def _mp_browse_cdb(self):
+        """Open a file dialog to select and load a CDB for multiplayer."""
         path = filedialog.askopenfilename(
             title="Select CDB database file",
             filetypes=[("CDB files", "*.cdb")],
@@ -457,6 +463,7 @@ class StartlistView:
         run_async(self.root, task, on_success, "Loading CDB...")
 
     def _mp_browse_html(self):
+        """Open a file dialog to select an HTML startlist for multiplayer."""
         path = filedialog.askopenfilename(
             title="Select HTML startlist file",
             filetypes=[("HTML files", "*.html *.htm"), ("All files", "*.*")],
@@ -465,6 +472,7 @@ class StartlistView:
             self.mp_html_var.set(path)
 
     def _mp_browse_output(self):
+        """Open a save dialog to set the multiplayer output CDB path."""
         path = filedialog.asksaveasfilename(
             title="Save modified CDB as",
             defaultextension=".cdb",
@@ -478,6 +486,7 @@ class StartlistView:
     # ======================================================================
 
     def _mp_log(self, msg):
+        """Append a message to the multiplayer log widget."""
         self.mp_log_widget.config(state='normal')
         self.mp_log_widget.insert('end', msg + "\n")
         self.mp_log_widget.see('end')
@@ -485,12 +494,14 @@ class StartlistView:
         self.root.update_idletasks()
 
     def _mp_clear_log(self):
+        """Clear the multiplayer log and reset the progress bar."""
         self.mp_log_widget.config(state='normal')
         self.mp_log_widget.delete('1.0', 'end')
         self.mp_log_widget.config(state='disabled')
         self.mp_progress_var.set(0)
 
     def _mp_update_progress(self, current, total):
+        """Update the multiplayer progress bar percentage."""
         self.mp_progress_var.set((current / total) * 100 if total else 0)
         self.root.update_idletasks()
 
@@ -499,6 +510,7 @@ class StartlistView:
     # ======================================================================
 
     def _mp_process(self):
+        """Run the full multiplayer pipeline: parse HTML, match IDs, modify CDB."""
         # Validate inputs
         if not self.mp_db or not self.mp_db.loaded:
             messagebox.showwarning("No CDB", "Please load a CDB file first.")
@@ -623,6 +635,7 @@ class StartlistView:
     # ======================================================================
 
     def _on_home(self):
+        """Reset all state and navigate back to the home screen."""
         # Reset singleplayer fields
         self.temp_path = None
         self.db = None

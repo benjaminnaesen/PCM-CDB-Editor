@@ -72,6 +72,7 @@ class StartlistDatabase:
     """
 
     def __init__(self, teams=None, cyclists=None, races=None):
+        """Initialize with optional pre-loaded data and build lookup indexes."""
         self.teams = teams or []
         self.cyclists = cyclists or []
         self.races = races or []
@@ -139,6 +140,7 @@ class StartlistDatabase:
 
     @staticmethod
     def _load_csv(path):
+        """Read a CSV file into a list of dicts, or return [] if missing."""
         if not os.path.isfile(path):
             return []
         with open(path, 'r', encoding='utf-8') as f:
@@ -287,10 +289,12 @@ class StartlistParser:
 
     @staticmethod
     def _is_firstcycling(soup):
+        """Check if HTML is from FirstCycling."""
         return bool(soup.find('a', href=lambda x: x and 'firstcycling.com' in x))
 
     @staticmethod
     def _parse_firstcycling(soup):
+        """Parse a FirstCycling startlist page (tablesorter tables with rider.php links)."""
         startlist = {}
 
         for table in soup.find_all('table', class_='tablesorter'):
@@ -395,6 +399,7 @@ class StartlistParser:
 
     @staticmethod
     def _parse_startlist_lists(soup):
+        """Fallback parser: extract teams from <ul> elements with 'startlist' class."""
         teams = soup.find_all('ul', class_=lambda x: x and 'startlist' in x.lower())
         if not teams:
             return None
@@ -422,6 +427,7 @@ class StartlistParser:
 
     @staticmethod
     def _parse_tables(soup):
+        """Fallback parser: extract teams/riders from generic HTML tables."""
         startlist = {}
 
         for table in soup.find_all('table'):
@@ -452,6 +458,7 @@ class StartlistParser:
 
     @staticmethod
     def _parse_team_divs(soup):
+        """Fallback parser: extract teams from <div> elements with 'team' class."""
         startlist = {}
 
         for div in soup.find_all('div', class_=lambda x: x and 'team' in x.lower()):
