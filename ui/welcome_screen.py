@@ -8,6 +8,7 @@ Displays application branding and large tile buttons for each tool
 import tkinter as tk
 import os
 from tkinter import messagebox
+from core.constants import APP_NAME, APP_VERSION
 from ui.ui_utils import ToolTip
 
 
@@ -46,11 +47,11 @@ class WelcomeScreen:
 
         # Title
         tk.Label(
-            container, text="PCM Database Tools",
+            container, text=APP_NAME,
             font=("Segoe UI", 24, "bold"), bg="white", fg="#333",
         ).pack(pady=(0, 4))
         tk.Label(
-            container, text="Modding tools for Pro Cycling Manager",
+            container, text=f"v{APP_VERSION} — Modding tools for Pro Cycling Manager",
             font=("Segoe UI", 10), bg="white", fg="#888",
         ).pack(pady=(0, 24))
 

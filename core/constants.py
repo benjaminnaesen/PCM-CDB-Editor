@@ -5,6 +5,10 @@ This module contains all magic numbers and configuration values
 used throughout the application, centralized for easy maintenance.
 """
 
+# App metadata
+APP_NAME = "PCM Database Tools"
+APP_VERSION = "1.1.0"
+
 # Pagination settings
 ROW_CHUNK_SIZE = 50  # Number of rows loaded per scroll chunk
 COL_CHUNK_SIZE = 15  # Number of columns loaded per scroll chunk

@@ -13,7 +13,7 @@ from tkinter import filedialog, ttk, messagebox, simpledialog
 
 from core.db_manager import DatabaseManager
 from core.app_state import AppState
-from core.constants import SEARCH_DEBOUNCE_DELAY
+from core.constants import APP_NAME, APP_VERSION, SEARCH_DEBOUNCE_DELAY
 import core.converter as converter
 import core.csv_io as csv_io
 from ui.welcome_screen import WelcomeScreen
@@ -37,7 +37,7 @@ class PCMDatabaseTools:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("PCM Database Tools")
+        self.root.title(f"{APP_NAME} v{APP_VERSION}")
         self.state = AppState("session_config.json")
         self.normal_geometry = self.state.settings.get("window_size", "1200x800")
         self.root.geometry(self.normal_geometry)
@@ -178,14 +178,14 @@ class PCMDatabaseTools:
         """Show the home screen, hiding all other views."""
         self.editor_frame.pack_forget()
         self.startlist_frame.pack_forget()
-        self.root.title("PCM Database Tools")
+        self.root.title(f"{APP_NAME} v{APP_VERSION}")
         self.welcome_screen.show()
 
     def show_startlist(self):
         """Show the startlist generator view."""
         self.welcome_screen.hide()
         self.editor_frame.pack_forget()
-        self.root.title("PCM Database Tools - Startlist Generator")
+        self.root.title(f"{APP_NAME} v{APP_VERSION} - Startlist Generator")
         self.startlist_frame.pack(fill=tk.BOTH, expand=True)
 
     # ==================================================================
@@ -329,7 +329,7 @@ class PCMDatabaseTools:
             self._update_tools_menu_state()
             self.welcome_screen.hide()
             self.startlist_frame.pack_forget()
-            self.root.title(f"PCM Database Tools - {os.path.basename(path)}")
+            self.root.title(f"{APP_NAME} v{APP_VERSION} - {os.path.basename(path)}")
             self.editor_frame.pack(fill=tk.BOTH, expand=True)
             self.status.config(text=f"Loaded: {path}")
             self.unsaved_changes = False

@@ -5,7 +5,10 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('SQLiteExporter', 'SQLiteExporter')],
+    datas=[
+        ('SQLiteExporter', 'SQLiteExporter'),
+        ('databases', 'databases'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -21,7 +24,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='PCM-CDB-Editor',
+    name='PCM Database Tools',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -40,5 +43,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='PCM-CDB-Editor',
+    name='PCM Database Tools',
 )
